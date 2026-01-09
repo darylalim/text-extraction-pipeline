@@ -3,3 +3,4 @@
 *.ipynb
 streamlit_env
 text_extraction.py
+streamlit_app_v1.py
