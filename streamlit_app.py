@@ -1,20 +1,12 @@
 import os
-import re
+
 import pandas as pd
 import streamlit as st
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-st.set_page_config(
-    page_title="Text Extraction Pipeline",
-    layout="centered"
-)
-
-st.title("Text Extraction Pipeline")
-st.write("Extract the Line of Credit Facility Maximum Borrowing Capacity from 10K sentences.")
-
 def get_device():
-    """Auto detect the best available device: MPS → CUDA → CPU"""
+    """Automatically detect the best available device in order of priority: MPS, CUDA, CPU."""
     if torch.backends.mps.is_available():
         return "mps"
     elif torch.cuda.is_available():
@@ -23,40 +15,15 @@ def get_device():
         return "cpu"
 
 @st.cache_resource
-def load_model():
+def load_model(device):
     """Load and cache the model and tokenizer."""
-    device = get_device()
     model_path = "ibm-granite/granite-4.0-h-tiny"
-    
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path, 
-        torch_dtype=torch.float16
-    )
-    model = model.to(device)
-    
-    return model, tokenizer, device
+    model = AutoModelForCausalLM.from_pretrained(model_path, device_map=device, dtype=torch.float16)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)    
+    return model, tokenizer
 
-def clean_assistant_tags(text):
-    """Remove assistant tags and other chat template artifacts from text."""
-    # Remove role and prompt control tags
-    patterns = [
-        r'<\|start_of_role\|>',
-        r'<\|end_of_role\|>',
-        r'<\|end_of_text\|>',
-        r'user',
-        r'assistant',
-        r'system',
-    ]
-    
-    for pattern in patterns:
-        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-    
-    return text.strip()
-
-def extract_credit_facility(text, model, tokenizer, device):
+def extract_text(text, model, tokenizer, device):
     """Extract Line of Credit Facility Maximum Borrowing Capacity from text."""
-    
     prompt = f"""Extract the Line Of Credit Facility Maximum Borrowing Capacity from the 10K sentences.
 Your response should only include the answer. Do not provide any further explanation.
 
@@ -94,13 +61,21 @@ Line Of Credit Facility Maximum Borrowing Capacity:"""
         answer = decoded.split("Line Of Credit Facility Maximum Borrowing Capacity:")[-1].strip()
         # Get the first line of the answer
         answer = answer.split("\n")[0].strip()
-        # Clean assistant tags from the answer
-        answer = clean_assistant_tags(answer)
-        if not answer or len(answer) > 50:  # Basic validation
+
+        # Remove chat template artifacts
+        for tag in ['assistant', 'user', 'system']:
+            answer = answer.replace(tag, '').strip()
+        
+        # Basic validation
+        if not answer or len(answer) > 50:  
             return "N/A"
         return answer
+    
     except Exception:
         return "N/A"
+
+st.title("Text Extraction Pipeline")
+st.write("Extract the Line of Credit Facility Maximum Borrowing Capacity from 10K sentences.")
 
 uploaded_file = st.file_uploader(
     "Upload CSV file",
@@ -108,25 +83,23 @@ uploaded_file = st.file_uploader(
     help="Upload a CSV file with 10K sentences"
 )
 
-if uploaded_file is not None:
-    original_filename = os.path.splitext(uploaded_file.name)[0]
+device = get_device()
 
+with st.spinner(f"Loading model on {device.upper()}..."):
+    model, tokenizer = load_model(device)
+
+if uploaded_file is not None:
     try:
         df = pd.read_csv(uploaded_file)
         st.success(f"File uploaded. ({len(df)} rows)")
         
         columns = df.columns.tolist()
         selected_column = st.selectbox(
-            "Select column with 10K sentences",
-            options=columns,
-            help="Select the column that contains the text to extract from"
+            "Select column for 10K sentences",
+            options=columns
         )
         
         if st.button("Extract", type="primary"):
-            with st.spinner("Loading model..."):
-                model, tokenizer, device = load_model()
-                st.info(f"Using device: **{device.upper()}**")
-            
             # Process each row
             results = []
             progress_bar = st.progress(0)
@@ -135,7 +108,7 @@ if uploaded_file is not None:
             with st.spinner("Extracting..."):
                 for idx, row in df.iterrows():
                     text = str(row[selected_column])
-                    result = extract_credit_facility(text, model, tokenizer, device)
+                    result = extract_text(text, model, tokenizer, device)
                     results.append(result)
                     
                     # Update progress
@@ -151,15 +124,15 @@ if uploaded_file is not None:
             # Store in session state for display and download
             st.session_state["processed_df"] = df
             st.session_state["selected_column"] = selected_column
-            st.session_state["original_filename"] = original_filename
+            st.session_state["uploaded_file"] = uploaded_file.name
         
         if "processed_df" in st.session_state:            
             display_df = st.session_state["processed_df"][
                 [st.session_state["selected_column"], "Line of Credit Facility Maximum Borrowing Capacity"]
             ]
 
-            st.write("**Results preview**")
-            st.dataframe(display_df.head(5), use_container_width=True)
+            st.write("Preview")
+            st.dataframe(display_df.head(), width='stretch')
             
             # Show extraction metrics
             total = len(st.session_state["processed_df"])
@@ -172,7 +145,8 @@ if uploaded_file is not None:
             col3.metric("N/A", na_count)
             
             csv_data = st.session_state["processed_df"].to_csv(index=False)
-            output_filename = f"{st.session_state['original_filename']}_extracted.csv"
+            base_name = os.path.splitext(st.session_state['uploaded_file'])[0]
+            output_filename = f"{base_name}_extract.csv"
             
             st.download_button(
                 label="Download",
@@ -185,4 +159,4 @@ if uploaded_file is not None:
         st.error(f"Error reading CSV file: {str(e)}")
 
 else:
-    st.info("Please upload a CSV file.")
+    st.info("Upload a CSV file.")
