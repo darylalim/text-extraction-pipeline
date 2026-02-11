@@ -1,6 +1,7 @@
 .DS_Store
-.ipynb_checkpoints
-*.ipynb
-streamlit_env
-text_extraction.py
-streamlit_app_v1.py
+.env
+__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+.pytest_cache/
