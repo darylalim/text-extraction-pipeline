@@ -8,6 +8,7 @@ dependencies = [
     "qwen-vl-utils==0.0.14",
     "streamlit==1.54.0",
     "torch==2.10.0",
+    "torchvision==0.25.0",
     "transformers==5.1.0",
 ]
 

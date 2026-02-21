@@ -9,7 +9,13 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-FIELD = "Line of Credit Facility Maximum Borrowing Capacity"
+TEST_TEMPLATE = json.dumps({"company": "string", "revenue": "string"})
+TEST_EXAMPLES = [
+    {
+        "input": "Acme Corp reported $1B in revenue.",
+        "output": json.dumps({"company": "Acme Corp", "revenue": "$1B"}),
+    }
+]
 
 
 @pytest.fixture(scope="module")
@@ -18,12 +24,18 @@ def app():
     import streamlit as st
     from transformers import AutoModelForImageTextToText, AutoProcessor
 
+    tab_mocks = [MagicMock(), MagicMock(), MagicMock()]
+
     with (
         patch.object(st, "title"),
-        patch.object(st, "write"),
+        patch.object(st, "text_area", return_value=""),
+        patch.object(st, "button", return_value=False),
         patch.object(st, "file_uploader", return_value=None),
+        patch.object(st, "tabs", return_value=tab_mocks),
         patch.object(st, "spinner"),
         patch.object(st, "info"),
+        patch.object(st, "error"),
+        patch.object(st, "sidebar", MagicMock()),
         patch.object(st, "cache_resource", side_effect=lambda f: f),
         patch.object(
             AutoModelForImageTextToText, "from_pretrained", return_value=MagicMock()
@@ -60,25 +72,190 @@ def _make_mocks(decode_output):
 # --- Constants ---
 
 
-def test_model_id(app):
-    assert app.MODEL_ID == "numind/NuExtract-2.0-4B"
+def test_default_template_is_valid_json(app):
+    parsed = json.loads(app.DEFAULT_TEMPLATE)
+    assert isinstance(parsed, dict)
+    assert len(parsed) > 0
 
 
-def test_field_name(app):
-    assert app.FIELD == FIELD
+def test_default_examples_have_required_keys(app):
+    parsed = json.loads(app.DEFAULT_EXAMPLES)
+    assert isinstance(parsed, list)
+    assert len(parsed) > 0
+    for ex in parsed:
+        assert "input" in ex
+        assert "output" in ex
 
 
-def test_max_new_tokens(app):
-    assert app.MAX_NEW_TOKENS == 256
+# --- validate_template ---
 
 
-def test_max_answer_length(app):
-    assert app.MAX_ANSWER_LENGTH == 50
+def test_validate_template_valid(app):
+    parsed, error = app.validate_template('{"name": "string"}')
+    assert parsed == {"name": "string"}
+    assert error is None
 
 
-def test_template(app):
-    parsed = json.loads(app.TEMPLATE)
-    assert FIELD in parsed
+def test_validate_template_invalid_json(app):
+    parsed, error = app.validate_template("not json {{{")
+    assert parsed is None
+    assert error is not None
+
+
+def test_validate_template_not_object(app):
+    parsed, error = app.validate_template("[1, 2, 3]")
+    assert parsed is None
+    assert "object" in error.lower()
+
+
+def test_validate_template_empty_object(app):
+    parsed, error = app.validate_template("{}")
+    assert parsed is None
+    assert "empty" in error.lower()
+
+
+# --- parse_examples ---
+
+
+def test_parse_examples_valid(app):
+    examples_str = json.dumps([{"input": "foo", "output": "bar"}])
+    parsed, error = app.parse_examples(examples_str)
+    assert parsed == [{"input": "foo", "output": "bar"}]
+    assert error is None
+
+
+def test_parse_examples_empty_string(app):
+    parsed, error = app.parse_examples("")
+    assert parsed == []
+    assert error is None
+
+
+def test_parse_examples_whitespace(app):
+    parsed, error = app.parse_examples("   ")
+    assert parsed == []
+    assert error is None
+
+
+def test_parse_examples_not_array(app):
+    parsed, error = app.parse_examples('{"not": "array"}')
+    assert parsed is None
+    assert "array" in error.lower()
+
+
+def test_parse_examples_missing_keys(app):
+    parsed, error = app.parse_examples('[{"input": "foo"}]')
+    assert parsed is None
+    assert "output" in error.lower()
+
+
+# --- extract ---
+
+
+def test_extract_returns_parsed_dict(app):
+    output = json.dumps({"company": "Acme", "revenue": "$1B"})
+    model, processor = _make_mocks(output)
+    result = app.extract(
+        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+    )
+    assert result == {"company": "Acme", "revenue": "$1B"}
+
+
+def test_extract_json_failure_returns_none(app):
+    model, processor = _make_mocks("not valid json {{{")
+    result = app.extract(
+        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+    )
+    assert result is None
+
+
+def test_extract_empty_values_returns_dict(app):
+    output = json.dumps({"company": "", "revenue": ""})
+    model, processor = _make_mocks(output)
+    result = app.extract(
+        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+    )
+    assert result == {"company": "", "revenue": ""}
+
+
+def test_extract_decodes_only_new_tokens(app):
+    output = json.dumps({"company": "Acme", "revenue": "$1B"})
+    model, processor = _make_mocks(output)
+    app.extract("some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
+
+    decode_call = processor.batch_decode.call_args
+    decoded_tensor = decode_call[0][0]
+    output_tensor = model.generate.return_value
+    input_len = 5  # _make_mocks creates input_ids with shape (1, 5)
+    expected_trimmed = output_tensor[:, input_len:]
+    assert torch.equal(decoded_tensor, expected_trimmed)
+    assert decode_call[1]["skip_special_tokens"] is True
+
+
+def test_extract_generate_error_propagates(app):
+    model, processor = _make_mocks(json.dumps({"company": "Acme"}))
+    model.generate.side_effect = RuntimeError("out of memory")
+    with pytest.raises(RuntimeError, match="out of memory"):
+        app.extract("some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
+
+
+def test_extract_passes_template_and_examples(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = _make_mocks(output)
+    app.extract("test sentence", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
+
+    call_args = processor.tokenizer.apply_chat_template.call_args
+    assert call_args[1]["template"] == TEST_TEMPLATE
+    assert call_args[1]["examples"] == TEST_EXAMPLES
+
+
+def test_extract_zero_shot(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = _make_mocks(output)
+    app.extract("test sentence", model, processor, "cpu", TEST_TEMPLATE, [])
+
+    call_args = processor.tokenizer.apply_chat_template.call_args
+    assert call_args[1]["examples"] == []
+
+
+def test_extract_image_builds_vision_message(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = _make_mocks(output)
+    fake_image = MagicMock()
+    fake_image_inputs = MagicMock()
+
+    with patch(
+        "streamlit_app.process_vision_info",
+        return_value=(fake_image_inputs, None),
+    ) as mock_pvi:
+        app.extract(
+            "context",
+            model,
+            processor,
+            "cpu",
+            TEST_TEMPLATE,
+            TEST_EXAMPLES,
+            image=fake_image,
+        )
+
+        mock_pvi.assert_called_once()
+        messages = mock_pvi.call_args[0][0]
+        assert messages[0]["role"] == "user"
+        content = messages[0]["content"]
+        assert content[0]["type"] == "image"
+        assert content[0]["image"] is fake_image
+        assert content[1] == {"type": "text", "text": "context"}
+
+        proc_call = processor.call_args
+        assert proc_call[1]["images"] is fake_image_inputs
+
+
+def test_extract_text_only_passes_images_none(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = _make_mocks(output)
+    app.extract("some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
+
+    proc_call = processor.call_args
+    assert proc_call[1]["images"] is None
 
 
 # --- get_device ---
@@ -103,71 +280,6 @@ def test_get_device_falls_back_to_cpu(app):
         patch("torch.cuda.is_available", return_value=False),
     ):
         assert app.get_device() == "cpu"
-
-
-# --- extract_text ---
-
-
-def test_extract_clean_answer(app):
-    model, processor = _make_mocks(json.dumps({FIELD: "$500M"}))
-    assert app.extract_text("some text", model, processor, "cpu") == "$500M"
-
-
-def test_extract_json_parse_failure_returns_na(app):
-    model, processor = _make_mocks("not valid json {{{")
-    assert app.extract_text("some text", model, processor, "cpu") == "N/A"
-
-
-def test_extract_empty_returns_na(app):
-    model, processor = _make_mocks(json.dumps({FIELD: ""}))
-    assert app.extract_text("some text", model, processor, "cpu") == "N/A"
-
-
-def test_extract_whitespace_returns_na(app):
-    model, processor = _make_mocks(json.dumps({FIELD: "   "}))
-    assert app.extract_text("some text", model, processor, "cpu") == "N/A"
-
-
-def test_extract_too_long_returns_na(app):
-    model, processor = _make_mocks(json.dumps({FIELD: "x" * 51}))
-    assert app.extract_text("some text", model, processor, "cpu") == "N/A"
-
-
-def test_extract_max_length_accepted(app):
-    answer = "x" * 50
-    model, processor = _make_mocks(json.dumps({FIELD: answer}))
-    assert app.extract_text("some text", model, processor, "cpu") == answer
-
-
-def test_extract_decodes_only_new_tokens(app):
-    model, processor = _make_mocks(json.dumps({FIELD: "$500M"}))
-    app.extract_text("some text", model, processor, "cpu")
-
-    decode_call = processor.batch_decode.call_args
-    decoded_tensor = decode_call[0][0]
-    output_tensor = model.generate.return_value
-    input_len = 5  # _make_mocks creates input_ids with shape (1, 5)
-    expected_trimmed = output_tensor[:, input_len:]
-    assert torch.equal(decoded_tensor, expected_trimmed)
-    assert decode_call[1]["skip_special_tokens"] is True
-
-
-def test_extract_generate_error_propagates(app):
-    model, processor = _make_mocks(json.dumps({FIELD: "$500M"}))
-    model.generate.side_effect = RuntimeError("out of memory")
-    with pytest.raises(RuntimeError, match="out of memory"):
-        app.extract_text("some text", model, processor, "cpu")
-
-
-def test_extract_builds_prompt_with_template_and_examples(app):
-    model, processor = _make_mocks(json.dumps({FIELD: "$500M"}))
-    app.extract_text("test sentence here", model, processor, "cpu")
-
-    call_args = processor.tokenizer.apply_chat_template.call_args
-    messages = call_args[0][0]
-    assert messages[0]["content"] == "test sentence here"
-    assert call_args[1]["template"] == app.TEMPLATE
-    assert call_args[1]["examples"] == app.EXAMPLES
 
 
 # --- load_model ---

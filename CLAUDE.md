@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Text extraction pipeline that uses IBM Granite 4.0 tiny LLM (`ibm-granite/granite-4.0-h-tiny`) to extract "Line of Credit Facility Maximum Borrowing Capacity" values from 10-K financial sentences. Provides a Streamlit web UI for batch CSV processing.
+General-purpose structured extraction pipeline using NuExtract-2.0-4B (`numind/NuExtract-2.0-4B`). Accepts arbitrary text or images, a user-defined JSON template, and optional in-context learning examples to extract structured data. Provides a Streamlit web UI with text, image, and CSV batch processing tabs.
 
 ## Commands
 
@@ -35,21 +35,24 @@ There is no CI/CD configured.
 
 ## Architecture
 
-The entire application lives in `streamlit_app.py` (~135 lines):
+The entire application lives in `streamlit_app.py` (~296 lines):
 
-- **Constants** — `MODEL_ID`, `FIELD`, `MAX_NEW_TOKENS` at top level eliminate repeated magic strings
+- **Constants** — `MODEL_ID`, `MAX_NEW_TOKENS`, `DEFAULT_TEMPLATE`, `DEFAULT_EXAMPLES` at top level; `DEFAULT_TEMPLATE` and `DEFAULT_EXAMPLES` are JSON strings that pre-populate the sidebar UI
 - **`get_device()`** — Auto-detects compute device: MPS (Apple Silicon) → CUDA → CPU
-- **`load_model(device)`** — Loads the Granite model and tokenizer from Hugging Face Hub in FP16; cached via `@st.cache_resource` so it loads once per session. Reads `HF_TOKEN` from environment for authenticated Hub access.
-- **`extract_text(text, model, tokenizer, device)`** — Runs inference using a few-shot prompt (2 examples of credit facility extraction). Decodes only new tokens (skips re-decoding the prompt). Post-processes output with regex to strip chat template tags, takes first line, and validates length (≤50 chars). Returns "N/A" on failure.
-- **Streamlit UI** — CSV upload → column selection → batch extraction with progress bar → results preview with metrics → CSV download
-- **Warning suppression** — Filters Mamba fast-path and MPS padding warnings at module level (known platform limitations on Apple Silicon)
+- **`load_model(device)`** — Loads the NuExtract model (`AutoModelForImageTextToText`) and processor (`AutoProcessor`) from Hugging Face Hub in BF16 with `trust_remote_code=True`; cached via `@st.cache_resource` so it loads once per session. Reads `HF_TOKEN` from environment for authenticated Hub access.
+- **`validate_template(template_str)`** — Parses a JSON string, checks it's a non-empty dict. Returns `(parsed_dict, error_msg)`.
+- **`parse_examples(examples_str)`** — Parses a JSON array of `{"input":..., "output":...}` objects. Returns `(list, error_msg)`. Empty/whitespace input returns `([], None)`.
+- **`extract(input_content, model, processor, device, template, examples, image=None)`** — Runs inference with a user-provided JSON template and ICL examples. Supports text-only and image+text inputs (using `process_vision_info` from `qwen_vl_utils` for image preprocessing). Returns the full parsed JSON dict, or `None` on parse failure.
+- **Streamlit UI** — Sidebar for template/examples configuration; three tabs: **Text** (free-form input → JSON result), **Image** (image upload + optional context → JSON result), **CSV Batch** (CSV upload → column selection → batch extraction with progress bar → multi-column results → CSV download)
+- **Warning suppression** — Filters MPS padding warnings at module level (known platform limitation on Apple Silicon)
 
-Tests are in `tests/test_streamlit_app.py` (22 tests covering constants, device detection, extraction post-processing, token decoding, and model loading).
+Tests are in `tests/test_streamlit_app.py` (27 tests covering constants, template/examples validation, extraction with text/image/zero-shot, token decoding, device detection, and model loading).
 
 ## Key Details
 
-- Model generates up to 50 new tokens per extraction (`MAX_NEW_TOKENS`)
-- Few-shot prompt examples are hardcoded in `extract_text()` — modify these to change extraction behavior
+- Model generates up to 256 new tokens per extraction (`MAX_NEW_TOKENS`) since output is JSON
+- JSON template and ICL examples are user-configurable via the sidebar; `DEFAULT_TEMPLATE` and `DEFAULT_EXAMPLES` provide a credit facility extraction starting point
+- Image support requires `qwen-vl-utils` and `torchvision` dependencies
 - Set `HF_TOKEN` env var for authenticated Hugging Face Hub access (optional; model is public)
 - Sample test data in `tests/data/csv/sample_10k_sentences.csv` (30 rows of synthetic 10-K sentences)
 - Dependencies in `pyproject.toml` are pinned to specific versions
