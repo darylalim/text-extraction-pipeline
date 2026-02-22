@@ -2,6 +2,10 @@ import json
 import os
 import warnings
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import pandas as pd
 import streamlit as st
 import torch
@@ -10,24 +14,53 @@ from qwen_vl_utils import process_vision_info
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
 warnings.filterwarnings("ignore", message=".*MPS: The constant padding.*")
+warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
 
 MODEL_ID = "numind/NuExtract-2.0-4B"
 MAX_NEW_TOKENS = 256
 DEFAULT_TEMPLATE = json.dumps(
-    {"Line of Credit Facility Maximum Borrowing Capacity": "verbatim-string"}, indent=2
+    {
+        "first_name": "verbatim-string",
+        "last_name": "verbatim-string",
+        "description": "string",
+        "age": "integer",
+        "gpa": "number",
+        "birth_date": "date-time",
+        "nationality": ["France", "England", "Japan", "USA", "China"],
+        "languages_spoken": [["English", "French", "Japanese", "Mandarin", "Spanish"]],
+    },
+    indent=2,
 )
 DEFAULT_EXAMPLES = json.dumps(
     [
         {
-            "input": "The credit agreement also provides that up to $500 million in commitments may be used for letters of credit.",
+            "input": "Yuki Tanaka is a 22-year-old Japanese student with a 3.8 GPA, born on March 15, 2003. She speaks Japanese, English, and French.",
             "output": json.dumps(
-                {"Line of Credit Facility Maximum Borrowing Capacity": "$500M"}
+                {
+                    "first_name": "Yuki",
+                    "last_name": "Tanaka",
+                    "description": "Japanese student who speaks three languages",
+                    "age": 22,
+                    "gpa": 3.8,
+                    "birth_date": "2003-03-15",
+                    "nationality": "Japan",
+                    "languages_spoken": ["Japanese", "English", "French"],
+                }
             ),
         },
         {
-            "input": "In March 2020, we upsized the Credit Agreement by $100 million, which matures July 2023, to $2.525 billion.",
+            "input": "Born July 4, 1998, James Smith is a 27-year-old American with a GPA of 3.2. He is fluent in English and Spanish.",
             "output": json.dumps(
-                {"Line of Credit Facility Maximum Borrowing Capacity": "$2.525B"}
+                {
+                    "first_name": "James",
+                    "last_name": "Smith",
+                    "description": "American who is fluent in English and Spanish",
+                    "age": 27,
+                    "gpa": 3.2,
+                    "birth_date": "1998-07-04",
+                    "nationality": "USA",
+                    "languages_spoken": ["English", "Spanish"],
+                }
             ),
         },
     ],
@@ -49,7 +82,7 @@ def load_model(device):
     model = AutoModelForImageTextToText.from_pretrained(
         MODEL_ID,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map=device,
         token=token,
     )
@@ -113,7 +146,7 @@ def extract(input_content, model, processor, device, template, examples, image=N
     ).to(device)
     input_len = inputs["input_ids"].shape[1]
 
-    with torch.no_grad():
+    with torch.inference_mode():
         output = model.generate(
             **inputs,
             do_sample=False,
@@ -132,6 +165,16 @@ def extract(input_content, model, processor, device, template, examples, image=N
         return None
 
 
+def _has_config_errors(template_error, examples_error):
+    if template_error:
+        st.error(f"Fix template: {template_error}")
+        return True
+    if examples_error:
+        st.error(f"Fix examples: {examples_error}")
+        return True
+    return False
+
+
 # --- Streamlit UI ---
 
 st.title("Text Extraction Pipeline")
@@ -144,6 +187,20 @@ with st.sidebar:
     template_parsed, template_error = validate_template(template_str)
     if template_error:
         st.error(template_error)
+    with st.expander("Supported types"):
+        st.markdown(
+            "- **verbatim-string** — extract text present verbatim in the input\n"
+            "- **string** — generic string, can incorporate paraphrasing/abstraction\n"
+            "- **integer** — a whole number\n"
+            "- **number** — a whole or decimal number\n"
+            "- **date-time** — ISO formatted date\n"
+            '- **array** — array of any type above, e.g. `["string"]`\n'
+            '- **enum** — choice from a set of options, e.g. `["yes", "no", "maybe"]`\n'
+            "- **multi-label** — enum with multiple answers, "
+            'e.g. `[["A", "B", "C"]]`\n\n'
+            "If no relevant information is found, the model returns `null` "
+            "or `[]` for arrays/multi-labels."
+        )
     st.subheader("Examples")
     examples_str = st.text_area(
         "ICL examples (JSON array)", value=DEFAULT_EXAMPLES, height=200
@@ -164,26 +221,25 @@ with text_tab:
         "Enter text to extract from", height=150, key="text_input"
     )
     if st.button("Extract", type="primary", key="text_extract"):
-        if template_error:
-            st.error(f"Fix template: {template_error}")
-        elif examples_error:
-            st.error(f"Fix examples: {examples_error}")
-        elif not input_text.strip():
-            st.warning("Enter some text.")
-        else:
-            with st.spinner("Extracting..."):
-                result = extract(
-                    input_text,
-                    model,
-                    processor,
-                    device,
-                    template_str,
-                    examples_parsed,
-                )
-            if result is not None:
-                st.json(result)
+        if not _has_config_errors(template_error, examples_error):
+            if not input_text.strip():
+                st.warning("Enter some text.")
             else:
-                st.error("Extraction failed — could not parse model output as JSON.")
+                with st.spinner("Extracting..."):
+                    result = extract(
+                        input_text,
+                        model,
+                        processor,
+                        device,
+                        template_str,
+                        examples_parsed,
+                    )
+                if result is not None:
+                    st.json(result)
+                else:
+                    st.error(
+                        "Extraction failed — could not parse model output as JSON."
+                    )
 
 with image_tab:
     uploaded_image = st.file_uploader(
@@ -194,29 +250,28 @@ with image_tab:
     )
     if uploaded_image is not None:
         pil_image = Image.open(uploaded_image)
-        st.image(pil_image, use_container_width=True)
+        st.image(pil_image, width="stretch")
     if st.button("Extract", type="primary", key="image_extract"):
-        if template_error:
-            st.error(f"Fix template: {template_error}")
-        elif examples_error:
-            st.error(f"Fix examples: {examples_error}")
-        elif uploaded_image is None:
-            st.warning("Upload an image.")
-        else:
-            with st.spinner("Extracting..."):
-                result = extract(
-                    image_context or None,
-                    model,
-                    processor,
-                    device,
-                    template_str,
-                    examples_parsed,
-                    image=pil_image,
-                )
-            if result is not None:
-                st.json(result)
+        if not _has_config_errors(template_error, examples_error):
+            if uploaded_image is None:
+                st.warning("Upload an image.")
             else:
-                st.error("Extraction failed — could not parse model output as JSON.")
+                with st.spinner("Extracting..."):
+                    result = extract(
+                        image_context or None,
+                        model,
+                        processor,
+                        device,
+                        template_str,
+                        examples_parsed,
+                        image=pil_image,
+                    )
+                if result is not None:
+                    st.json(result)
+                else:
+                    st.error(
+                        "Extraction failed — could not parse model output as JSON."
+                    )
 
 with csv_tab:
     uploaded_file = st.file_uploader(
@@ -235,11 +290,7 @@ with csv_tab:
             )
 
             if st.button("Extract", type="primary", key="csv_extract"):
-                if template_error:
-                    st.error(f"Fix template: {template_error}")
-                elif examples_error:
-                    st.error(f"Fix examples: {examples_error}")
-                else:
+                if not _has_config_errors(template_error, examples_error):
                     results = []
                     progress_bar = st.progress(0, text="Starting...")
 
@@ -270,7 +321,7 @@ with csv_tab:
                     st.write("Preview")
                     st.dataframe(
                         df[[selected_column] + fields].head(),
-                        use_container_width=True,
+                        width="stretch",
                     )
 
                     total = len(df)
