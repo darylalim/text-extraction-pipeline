@@ -148,6 +148,33 @@ def test_parse_examples_missing_keys(app):
     assert "output" in error.lower()
 
 
+# --- _has_config_errors ---
+
+
+def test_has_config_errors_template_error(app):
+    with patch("streamlit_app.st") as mock_st:
+        assert app._has_config_errors("bad json", None) is True
+        mock_st.error.assert_called_once_with("Fix template: bad json")
+
+
+def test_has_config_errors_examples_error(app):
+    with patch("streamlit_app.st") as mock_st:
+        assert app._has_config_errors(None, "missing keys") is True
+        mock_st.error.assert_called_once_with("Fix examples: missing keys")
+
+
+def test_has_config_errors_no_errors(app):
+    with patch("streamlit_app.st") as mock_st:
+        assert app._has_config_errors(None, None) is False
+        mock_st.error.assert_not_called()
+
+
+def test_has_config_errors_template_takes_priority(app):
+    with patch("streamlit_app.st") as mock_st:
+        assert app._has_config_errors("bad template", "bad examples") is True
+        mock_st.error.assert_called_once_with("Fix template: bad template")
+
+
 # --- extract ---
 
 
@@ -189,6 +216,16 @@ def test_extract_decodes_only_new_tokens(app):
     expected_trimmed = output_tensor[:, input_len:]
     assert torch.equal(decoded_tensor, expected_trimmed)
     assert decode_call[1]["skip_special_tokens"] is True
+
+
+def test_extract_uses_inference_mode(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = _make_mocks(output)
+    with patch("streamlit_app.torch.inference_mode") as mock_ctx:
+        mock_ctx.return_value.__enter__ = MagicMock()
+        mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        app.extract("some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
+        mock_ctx.assert_called_once()
 
 
 def test_extract_generate_error_propagates(app):
