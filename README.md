@@ -1,5 +1,5 @@
 # Text Extraction Pipeline
-Extract the Line of Credit Facility Maximum Borrowing Capacity from 10K sentences with IBM Granite 4.0 language models.
+General-purpose structured extraction pipeline using NuExtract-2.0-4B. Accepts arbitrary text or images, a user-defined JSON template, and optional in-context learning examples to extract structured data.
 
 ## Installation
 Run the following commands in the terminal.
@@ -14,7 +14,4 @@ Run the following commands in the terminal.
 uv run pytest
 ```
 
-Sample test data is in `tests/data/csv/sample_10k_sentences.csv` (30 rows of synthetic 10-K sentences).
-
-## Note
-- With the test dataset `sample_10k_sentences.csv`, if the Granite 4.0 model does not extract text, the result is either N/A or $2.525B 😂
+Sample test data is in `tests/data/csv/sample_persons.csv` (30 rows of synthetic person descriptions).
