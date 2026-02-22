@@ -1,58 +1,44 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-General-purpose structured extraction pipeline using NuExtract-2.0-4B (`numind/NuExtract-2.0-4B`). Accepts arbitrary text or images, a user-defined JSON template, and optional in-context learning examples to extract structured data. Provides a Streamlit web UI with text, image, and CSV batch processing tabs.
+Structured extraction pipeline using NuExtract-2.0-4B (`numind/NuExtract-2.0-4B`). Accepts text or images with a user-defined JSON template and optional ICL examples. Streamlit web UI with text, image, and CSV batch processing tabs.
 
 ## Commands
 
 ```bash
-# Setup environment
-uv sync
-
-# Run the app
-uv run streamlit run streamlit_app.py
-
-# Lint
-uv run ruff check .
-
-# Format
-uv run ruff format .
-
-# Type check
-uv run ty check
-
-# Run tests
-uv run pytest
-
-# Run a single test
-uv run pytest tests/test_file.py::test_name
+uv sync                                    # Setup environment
+uv run streamlit run streamlit_app.py      # Run the app
+uv run ruff check .                        # Lint
+uv run ruff format .                       # Format
+uv run ty check                            # Type check
+uv run pytest                              # Run tests
+uv run pytest tests/test_file.py::test_name  # Run a single test
 ```
 
-There is no CI/CD configured.
+No CI/CD configured.
 
 ## Architecture
 
-The entire application lives in `streamlit_app.py` (~296 lines):
+Single-file app in `streamlit_app.py` (~346 lines):
 
-- **Constants** — `MODEL_ID`, `MAX_NEW_TOKENS`, `DEFAULT_TEMPLATE`, `DEFAULT_EXAMPLES` at top level; `DEFAULT_TEMPLATE` and `DEFAULT_EXAMPLES` are JSON strings that pre-populate the sidebar UI
-- **`get_device()`** — Auto-detects compute device: MPS (Apple Silicon) → CUDA → CPU
-- **`load_model(device)`** — Loads the NuExtract model (`AutoModelForImageTextToText`) and processor (`AutoProcessor`) from Hugging Face Hub in BF16 with `trust_remote_code=True`; cached via `@st.cache_resource` so it loads once per session. Reads `HF_TOKEN` from environment for authenticated Hub access.
-- **`validate_template(template_str)`** — Parses a JSON string, checks it's a non-empty dict. Returns `(parsed_dict, error_msg)`.
-- **`parse_examples(examples_str)`** — Parses a JSON array of `{"input":..., "output":...}` objects. Returns `(list, error_msg)`. Empty/whitespace input returns `([], None)`.
-- **`extract(input_content, model, processor, device, template, examples, image=None)`** — Runs inference with a user-provided JSON template and ICL examples. Supports text-only and image+text inputs (using `process_vision_info` from `qwen_vl_utils` for image preprocessing). Returns the full parsed JSON dict, or `None` on parse failure.
-- **Streamlit UI** — Sidebar for template/examples configuration; three tabs: **Text** (free-form input → JSON result), **Image** (image upload + optional context → JSON result), **CSV Batch** (CSV upload → column selection → batch extraction with progress bar → multi-column results → CSV download)
-- **Warning suppression** — Filters MPS padding warnings at module level (known platform limitation on Apple Silicon)
+- **Constants** — `MODEL_ID`, `MAX_NEW_TOKENS`, `DEFAULT_TEMPLATE`, `DEFAULT_EXAMPLES`
+- **`get_device()`** — Auto-detects compute: MPS → CUDA → CPU
+- **`load_model(device)`** — Loads model and processor in BF16; cached via `@st.cache_resource`
+- **`validate_template(template_str)`** — Validates JSON string is a non-empty dict; returns `(parsed, error)`
+- **`parse_examples(examples_str)`** — Validates JSON array of `{"input", "output"}` objects; returns `(list, error)`
+- **`extract(..., image=None)`** — Runs inference under `torch.inference_mode()` with template and ICL examples; supports text-only and image+text; returns parsed JSON dict or `None`
+- **`_has_config_errors(template_error, examples_error)`** — Shows first config error via `st.error` and returns `True`, or returns `False` if none; used by all three tabs
+- **Streamlit UI** — Sidebar for template/examples config; three tabs: Text, Image, CSV Batch
+- **Warning suppression** — Filters known MPS padding warnings
 
-Tests are in `tests/test_streamlit_app.py` (27 tests covering constants, template/examples validation, extraction with text/image/zero-shot, token decoding, device detection, and model loading).
+Tests in `tests/test_streamlit_app.py` (32 tests): constants, template/examples validation, config error helper, extraction (text, image, zero-shot, inference_mode, token decoding, error propagation), device detection, model loading.
 
 ## Key Details
 
-- Model generates up to 256 new tokens per extraction (`MAX_NEW_TOKENS`) since output is JSON
-- JSON template and ICL examples are user-configurable via the sidebar; `DEFAULT_TEMPLATE` and `DEFAULT_EXAMPLES` provide a credit facility extraction starting point
-- Image support requires `qwen-vl-utils` and `torchvision` dependencies
-- Set `HF_TOKEN` env var for authenticated Hugging Face Hub access (optional; model is public)
-- Sample test data in `tests/data/csv/sample_10k_sentences.csv` (30 rows of synthetic 10-K sentences)
-- Dependencies in `pyproject.toml` are pinned to specific versions
+- Max 256 new tokens per extraction (`MAX_NEW_TOKENS`) since output is JSON
+- `DEFAULT_TEMPLATE` and `DEFAULT_EXAMPLES` provide a person-extraction starting point
+- Image support requires `qwen-vl-utils` and `torchvision`
+- `HF_TOKEN` env var enables authenticated Hub access (optional; model is public)
+- Sample test data: `tests/data/csv/sample_persons.csv` (30 rows)
+- Dependencies in `pyproject.toml` pinned to specific versions
