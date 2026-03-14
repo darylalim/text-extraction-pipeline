@@ -10,10 +10,9 @@ import pandas as pd
 import streamlit as st
 import torch
 from PIL import Image
-from qwen_vl_utils import process_vision_info
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
-from utils import generate_template
+from utils import generate_template, process_all_vision_info
 
 warnings.filterwarnings("ignore", message=".*MPS: The constant padding.*")
 warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
@@ -141,7 +140,7 @@ def extract(input_content, model, processor, device, template, examples, image=N
         if input_content:
             content.append({"type": "text", "text": input_content})
         messages = [{"role": "user", "content": content}]
-        image_inputs, _ = process_vision_info(messages)
+        image_inputs = process_all_vision_info(messages, examples)
     else:
         messages = [{"role": "user", "content": input_content}]
         image_inputs = None

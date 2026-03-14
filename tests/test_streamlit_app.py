@@ -149,49 +149,57 @@ def test_parse_examples_missing_keys(app):
 
 
 def test_parse_examples_image_input_accepted(app):
-    examples_str = json.dumps([
-        {
-            "input": {"type": "image", "image": "https://example.com/img.png"},
-            "output": '{"name": "John"}',
-        }
-    ])
+    examples_str = json.dumps(
+        [
+            {
+                "input": {"type": "image", "image": "https://example.com/img.png"},
+                "output": '{"name": "John"}',
+            }
+        ]
+    )
     parsed, error = app.parse_examples(examples_str)
     assert parsed is not None
     assert error is None
 
 
 def test_parse_examples_image_input_missing_image_key(app):
-    examples_str = json.dumps([
-        {
-            "input": {"type": "image"},
-            "output": '{"name": "John"}',
-        }
-    ])
+    examples_str = json.dumps(
+        [
+            {
+                "input": {"type": "image"},
+                "output": '{"name": "John"}',
+            }
+        ]
+    )
     parsed, error = app.parse_examples(examples_str)
     assert parsed is None
     assert error is not None
 
 
 def test_parse_examples_image_input_non_http_url_rejected(app):
-    examples_str = json.dumps([
-        {
-            "input": {"type": "image", "image": "file:///etc/passwd"},
-            "output": '{"name": "John"}',
-        }
-    ])
+    examples_str = json.dumps(
+        [
+            {
+                "input": {"type": "image", "image": "file:///etc/passwd"},
+                "output": '{"name": "John"}',
+            }
+        ]
+    )
     parsed, error = app.parse_examples(examples_str)
     assert parsed is None
     assert error is not None
 
 
 def test_parse_examples_mixed_text_and_image_accepted(app):
-    examples_str = json.dumps([
-        {"input": "text example", "output": '{"name": "Alice"}'},
-        {
-            "input": {"type": "image", "image": "https://example.com/img.png"},
-            "output": '{"name": "Bob"}',
-        },
-    ])
+    examples_str = json.dumps(
+        [
+            {"input": "text example", "output": '{"name": "Alice"}'},
+            {
+                "input": {"type": "image", "image": "https://example.com/img.png"},
+                "output": '{"name": "Bob"}',
+            },
+        ]
+    )
     parsed, error = app.parse_examples(examples_str)
     assert parsed is not None
     assert len(parsed) == 2
@@ -308,12 +316,12 @@ def test_extract_image_builds_vision_message(app):
     output = json.dumps({"company": "Acme"})
     model, processor = _make_mocks(output)
     fake_image = MagicMock()
-    fake_image_inputs = MagicMock()
+    fake_image_inputs = [MagicMock()]
 
     with patch(
-        "streamlit_app.process_vision_info",
-        return_value=(fake_image_inputs, None),
-    ) as mock_pvi:
+        "streamlit_app.process_all_vision_info",
+        return_value=fake_image_inputs,
+    ) as mock_pavi:
         app.extract(
             "context",
             model,
@@ -324,8 +332,8 @@ def test_extract_image_builds_vision_message(app):
             image=fake_image,
         )
 
-        mock_pvi.assert_called_once()
-        messages = mock_pvi.call_args[0][0]
+        mock_pavi.assert_called_once()
+        messages = mock_pavi.call_args[0][0]
         assert messages[0]["role"] == "user"
         content = messages[0]["content"]
         assert content[0]["type"] == "image"
@@ -390,6 +398,43 @@ def test_extract_at_token_limit_succeeds(app):
         "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
     )
     assert result == {"company": "Acme"}
+
+
+# --- extract with image examples ---
+
+
+def test_extract_image_with_image_examples_calls_process_all(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = _make_mocks(output)
+    fake_image = MagicMock()
+    fake_all_images = [MagicMock(), MagicMock()]
+    image_examples = [
+        {
+            "input": {"type": "image", "image": "https://example.com/ex.png"},
+            "output": '{"company": "Test"}',
+        }
+    ]
+
+    with patch(
+        "streamlit_app.process_all_vision_info",
+        return_value=fake_all_images,
+    ) as mock_pavi:
+        app.extract(
+            "context",
+            model,
+            processor,
+            "cpu",
+            TEST_TEMPLATE,
+            image_examples,
+            image=fake_image,
+        )
+
+        mock_pavi.assert_called_once()
+        call_args = mock_pavi.call_args
+        assert call_args[0][1] == image_examples
+
+        proc_call = processor.call_args
+        assert proc_call[1]["images"] is fake_all_images
 
 
 # --- get_device ---
