@@ -1,6 +1,7 @@
 [project]
 name = "text-extraction-pipeline"
-version = "0.1.0"
+version = "0.2.0"
+description = "Structured extraction pipeline using NuExtract-2.0-4B with Streamlit UI"
 requires-python = ">=3.12"
 dependencies = [
     "accelerate==1.12.0",
@@ -19,3 +20,6 @@ dev = [
     "ruff==0.15.0",
     "ty==0.0.16",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"streamlit_app.py" = ["E402"]
