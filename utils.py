@@ -3,6 +3,8 @@ import json
 import torch
 from qwen_vl_utils import fetch_image, process_vision_info
 
+MAX_NEW_TOKENS = 256
+
 
 def generate_template(description, model, processor, device):
     """Generate a JSON extraction template from a natural language description.
@@ -29,7 +31,7 @@ def generate_template(description, model, processor, device):
             **inputs,
             do_sample=False,
             num_beams=1,
-            max_new_tokens=256,
+            max_new_tokens=MAX_NEW_TOKENS,
         )
 
     trimmed = output[:, input_len:]

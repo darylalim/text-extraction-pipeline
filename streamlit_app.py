@@ -12,13 +12,12 @@ import torch
 from PIL import Image
 from transformers import AutoModelForImageTextToText, AutoProcessor
 
-from utils import generate_template, process_all_vision_info
+from utils import MAX_NEW_TOKENS, generate_template, process_all_vision_info
 
 warnings.filterwarnings("ignore", message=".*MPS: The constant padding.*")
 warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
 
 MODEL_ID = "numind/NuExtract-2.0-4B"
-MAX_NEW_TOKENS = 256
 MAX_INPUT_TOKENS = 10_000
 DEFAULT_TEMPLATE = json.dumps(
     {
@@ -384,7 +383,7 @@ with csv_tab:
                         mime="text/csv",
                     )
 
-        except Exception as e:
+        except (pd.errors.ParserError, KeyError, UnicodeDecodeError) as e:
             st.error(f"Error: {e}")
     else:
         st.info("Upload a CSV file.")
