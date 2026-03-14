@@ -49,7 +49,7 @@ def app():
         sys.modules.pop("streamlit_app", None)
 
 
-def _make_mocks(decode_output):
+def make_mocks(decode_output):
     """Create mock model and processor that produce the given decode output."""
     processor = MagicMock()
     input_ids = torch.tensor([[1, 2, 3, 4, 5]])
@@ -85,6 +85,10 @@ def test_default_examples_have_required_keys(app):
     for ex in parsed:
         assert "input" in ex
         assert "output" in ex
+
+
+def test_max_input_tokens_constant(app):
+    assert app.MAX_INPUT_TOKENS == 10_000
 
 
 # --- validate_template ---
@@ -190,6 +194,48 @@ def test_parse_examples_image_input_non_http_url_rejected(app):
     assert error is not None
 
 
+def test_parse_examples_image_input_wrong_type(app):
+    examples_str = json.dumps(
+        [
+            {
+                "input": {"type": "video", "image": "https://example.com/vid.mp4"},
+                "output": '{"name": "John"}',
+            }
+        ]
+    )
+    parsed, error = app.parse_examples(examples_str)
+    assert parsed is None
+    assert "image" in error.lower()
+
+
+def test_parse_examples_image_input_empty_url(app):
+    examples_str = json.dumps(
+        [
+            {
+                "input": {"type": "image", "image": ""},
+                "output": '{"name": "John"}',
+            }
+        ]
+    )
+    parsed, error = app.parse_examples(examples_str)
+    assert parsed is None
+    assert error is not None
+
+
+def test_parse_examples_image_input_non_string_url(app):
+    examples_str = json.dumps(
+        [
+            {
+                "input": {"type": "image", "image": 12345},
+                "output": '{"name": "John"}',
+            }
+        ]
+    )
+    parsed, error = app.parse_examples(examples_str)
+    assert parsed is None
+    assert error is not None
+
+
 def test_parse_examples_mixed_text_and_image_accepted(app):
     examples_str = json.dumps(
         [
@@ -238,7 +284,7 @@ def test_has_config_errors_template_takes_priority(app):
 
 def test_extract_returns_parsed_dict(app):
     output = json.dumps({"company": "Acme", "revenue": "$1B"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     result = app.extract(
         "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
     )
@@ -246,7 +292,7 @@ def test_extract_returns_parsed_dict(app):
 
 
 def test_extract_json_failure_returns_none(app):
-    model, processor = _make_mocks("not valid json {{{")
+    model, processor = make_mocks("not valid json {{{")
     result = app.extract(
         "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
     )
@@ -255,7 +301,7 @@ def test_extract_json_failure_returns_none(app):
 
 def test_extract_empty_values_returns_dict(app):
     output = json.dumps({"company": "", "revenue": ""})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     result = app.extract(
         "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
     )
@@ -264,7 +310,7 @@ def test_extract_empty_values_returns_dict(app):
 
 def test_extract_decodes_only_new_tokens(app):
     output = json.dumps({"company": "Acme", "revenue": "$1B"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     app.extract("some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
 
     decode_call = processor.batch_decode.call_args
@@ -278,7 +324,7 @@ def test_extract_decodes_only_new_tokens(app):
 
 def test_extract_uses_inference_mode(app):
     output = json.dumps({"company": "Acme"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     with patch("streamlit_app.torch.inference_mode") as mock_ctx:
         mock_ctx.return_value.__enter__ = MagicMock()
         mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
@@ -287,7 +333,7 @@ def test_extract_uses_inference_mode(app):
 
 
 def test_extract_generate_error_propagates(app):
-    model, processor = _make_mocks(json.dumps({"company": "Acme"}))
+    model, processor = make_mocks(json.dumps({"company": "Acme"}))
     model.generate.side_effect = RuntimeError("out of memory")
     with pytest.raises(RuntimeError, match="out of memory"):
         app.extract("some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
@@ -295,7 +341,7 @@ def test_extract_generate_error_propagates(app):
 
 def test_extract_passes_template_and_examples(app):
     output = json.dumps({"company": "Acme"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     app.extract("test sentence", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
 
     call_args = processor.tokenizer.apply_chat_template.call_args
@@ -305,7 +351,7 @@ def test_extract_passes_template_and_examples(app):
 
 def test_extract_zero_shot(app):
     output = json.dumps({"company": "Acme"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     app.extract("test sentence", model, processor, "cpu", TEST_TEMPLATE, [])
 
     call_args = processor.tokenizer.apply_chat_template.call_args
@@ -314,7 +360,7 @@ def test_extract_zero_shot(app):
 
 def test_extract_image_builds_vision_message(app):
     output = json.dumps({"company": "Acme"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     fake_image = MagicMock()
     fake_image_inputs = [MagicMock()]
 
@@ -346,28 +392,45 @@ def test_extract_image_builds_vision_message(app):
 
 def test_extract_text_only_passes_images_none(app):
     output = json.dumps({"company": "Acme"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     app.extract("some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
 
     proc_call = processor.call_args
     assert proc_call[1]["images"] is None
 
 
-# --- Token limit ---
-
-
-def test_extract_under_token_limit_succeeds(app):
+def test_extract_image_no_context_text(app):
     output = json.dumps({"company": "Acme"})
-    model, processor = _make_mocks(output)
-    result = app.extract(
-        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
-    )
-    assert result == {"company": "Acme"}
+    model, processor = make_mocks(output)
+    fake_image = MagicMock()
+    fake_image_inputs = [MagicMock()]
+
+    with patch(
+        "streamlit_app.process_all_vision_info",
+        return_value=fake_image_inputs,
+    ) as mock_pavi:
+        app.extract(
+            None,
+            model,
+            processor,
+            "cpu",
+            TEST_TEMPLATE,
+            TEST_EXAMPLES,
+            image=fake_image,
+        )
+
+        messages = mock_pavi.call_args[0][0]
+        content = messages[0]["content"]
+        assert len(content) == 1
+        assert content[0]["type"] == "image"
+
+
+# --- Token limit ---
 
 
 def test_extract_over_token_limit_raises(app):
     output = json.dumps({"company": "Acme"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     # Override input_ids to exceed MAX_INPUT_TOKENS
     big_input_ids = torch.ones(1, 10_001, dtype=torch.long)
     proc_result = MagicMock()
@@ -382,7 +445,7 @@ def test_extract_over_token_limit_raises(app):
 
 def test_extract_at_token_limit_succeeds(app):
     output = json.dumps({"company": "Acme"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     # Override input_ids to exactly MAX_INPUT_TOKENS
     exact_input_ids = torch.ones(1, 10_000, dtype=torch.long)
     proc_result = MagicMock()
@@ -405,7 +468,7 @@ def test_extract_at_token_limit_succeeds(app):
 
 def test_extract_image_with_image_examples_calls_process_all(app):
     output = json.dumps({"company": "Acme"})
-    model, processor = _make_mocks(output)
+    model, processor = make_mocks(output)
     fake_image = MagicMock()
     fake_all_images = [MagicMock(), MagicMock()]
     image_examples = [
