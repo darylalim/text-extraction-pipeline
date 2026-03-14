@@ -295,6 +295,53 @@ def test_extract_text_only_passes_images_none(app):
     assert proc_call[1]["images"] is None
 
 
+# --- Token limit ---
+
+
+def test_extract_under_token_limit_succeeds(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = _make_mocks(output)
+    result = app.extract(
+        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+    )
+    assert result == {"company": "Acme"}
+
+
+def test_extract_over_token_limit_raises(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = _make_mocks(output)
+    # Override input_ids to exceed MAX_INPUT_TOKENS
+    big_input_ids = torch.ones(1, 10_001, dtype=torch.long)
+    proc_result = MagicMock()
+    proc_result.to.return_value = {
+        "input_ids": big_input_ids,
+        "attention_mask": torch.ones_like(big_input_ids),
+    }
+    processor.return_value = proc_result
+    with pytest.raises(ValueError, match="10001.*10000"):
+        app.extract("some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
+
+
+def test_extract_at_token_limit_succeeds(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = _make_mocks(output)
+    # Override input_ids to exactly MAX_INPUT_TOKENS
+    exact_input_ids = torch.ones(1, 10_000, dtype=torch.long)
+    proc_result = MagicMock()
+    proc_result.to.return_value = {
+        "input_ids": exact_input_ids,
+        "attention_mask": torch.ones_like(exact_input_ids),
+    }
+    processor.return_value = proc_result
+    model.generate.return_value = torch.cat(
+        [exact_input_ids, torch.tensor([[10, 20, 30]])], dim=1
+    )
+    result = app.extract(
+        "some text", model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+    )
+    assert result == {"company": "Acme"}
+
+
 # --- get_device ---
 
 

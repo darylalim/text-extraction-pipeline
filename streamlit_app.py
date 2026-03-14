@@ -18,6 +18,7 @@ warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
 
 MODEL_ID = "numind/NuExtract-2.0-4B"
 MAX_NEW_TOKENS = 256
+MAX_INPUT_TOKENS = 10_000
 DEFAULT_TEMPLATE = json.dumps(
     {
         "first_name": "verbatim-string",
@@ -145,6 +146,10 @@ def extract(input_content, model, processor, device, template, examples, image=N
         text=[formatted], images=image_inputs, padding=True, return_tensors="pt"
     ).to(device)
     input_len = inputs["input_ids"].shape[1]
+    if input_len > MAX_INPUT_TOKENS:
+        raise ValueError(
+            f"Input too long: {input_len} tokens (limit: {MAX_INPUT_TOKENS})."
+        )
 
     with torch.inference_mode():
         output = model.generate(
