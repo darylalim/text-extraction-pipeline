@@ -20,11 +20,11 @@ No CI/CD configured.
 
 ## Architecture
 
-Main app in `streamlit_app.py` (~380 lines), utilities in `utils.py` (~50 lines):
+Main app in `streamlit_app.py` (~390 lines), utilities in `utils.py` (~65 lines):
 
 ### `streamlit_app.py`
 
-- **Constants** — `MODEL_ID`, `MAX_NEW_TOKENS`, `MAX_INPUT_TOKENS`, `DEFAULT_TEMPLATE`, `DEFAULT_EXAMPLES`
+- **Constants** — `MODEL_ID`, `MAX_INPUT_TOKENS`, `DEFAULT_TEMPLATE`, `DEFAULT_EXAMPLES`
 - **`get_device()`** — Auto-detects compute: MPS → CUDA → CPU
 - **`load_model(device)`** — Loads model and processor in BF16; cached via `@st.cache_resource`
 - **`validate_template(template_str)`** — Validates JSON string is a non-empty dict; returns `(parsed, error)`
@@ -36,10 +36,11 @@ Main app in `streamlit_app.py` (~380 lines), utilities in `utils.py` (~50 lines)
 
 ### `utils.py`
 
+- **Constants** — `MAX_NEW_TOKENS`
 - **`generate_template(description, model, processor, device)`** — Generates a JSON extraction template from a natural language description using NuExtract's native `template=None` mode; returns `(dict, None)` or `(None, error)`
 - **`process_all_vision_info(messages, examples=None)`** — Extracts images from both ICL examples and user messages; returns flat list in correct order (example images first) or `None`
 
-Tests in `tests/test_streamlit_app.py` and `tests/test_utils.py`.
+Tests in `tests/test_streamlit_app.py` (45 tests) and `tests/test_utils.py` (13 tests).
 
 ## Key Details
 
