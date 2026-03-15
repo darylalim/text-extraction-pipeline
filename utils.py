@@ -160,10 +160,15 @@ def process_all_vision_info(messages, examples=None):
     (messages is a list of lists of dicts). Returns a flat list of images
     in per-item order (example images then message images for each item),
     or None if no images found.
+
+    Raises ValueError if batched examples length doesn't match messages length.
     """
+    if not messages:
+        return None
+
     # Detect single vs batch: single messages is [{"role": ...}, ...],
     # batch is [[{"role": ...}, ...], ...]
-    is_batch = messages and isinstance(messages[0], list)
+    is_batch = isinstance(messages[0], list)
     messages_batch = messages if is_batch else [messages]
 
     # Normalize examples
@@ -174,7 +179,7 @@ def process_all_vision_info(messages, examples=None):
         examples_batch = examples
     else:
         # Single examples list: broadcast to each batch item
-        examples_batch = [examples] * len(messages_batch)
+        examples_batch = [examples for _ in messages_batch]
 
     if len(examples_batch) != len(messages_batch):
         raise ValueError(
