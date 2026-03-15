@@ -796,3 +796,26 @@ def test_load_presets_actual_file(app):
         assert isinstance(p["template"], dict) and p["template"]
         assert isinstance(p["examples"], list)
         assert isinstance(p["sample_text"], str)
+
+
+# --- _clear_device_cache ---
+
+
+def test_clear_device_cache_cuda(app):
+    with patch("streamlit_app.torch") as mock_torch:
+        mock_torch.cuda = MagicMock()
+        app._clear_device_cache("cuda")
+        mock_torch.cuda.empty_cache.assert_called_once()
+
+
+def test_clear_device_cache_mps(app):
+    with patch("streamlit_app.torch") as mock_torch:
+        mock_torch.mps = MagicMock()
+        app._clear_device_cache("mps")
+        mock_torch.mps.empty_cache.assert_called_once()
+
+
+def test_clear_device_cache_cpu_is_noop(app):
+    with patch("streamlit_app.torch") as mock_torch:
+        app._clear_device_cache("cpu")
+        mock_torch.cuda.empty_cache.assert_not_called()

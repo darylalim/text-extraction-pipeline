@@ -260,6 +260,14 @@ def _convert_template_if_needed(json_str, source_format):
     return None
 
 
+def _clear_device_cache(device):
+    """Clear device memory cache after OOM errors."""
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    elif device == "mps":
+        torch.mps.empty_cache()
+
+
 # --- Streamlit UI ---
 
 st.title("Text Extraction Pipeline")
