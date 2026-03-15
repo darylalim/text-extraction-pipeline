@@ -37,6 +37,7 @@ def app():
         patch.object(st, "error"),
         patch.object(st, "sidebar", MagicMock()),
         patch.object(st, "cache_resource", side_effect=lambda f: f),
+        patch.object(st, "cache_data", side_effect=lambda f: f),
         patch.object(
             AutoModelForImageTextToText, "from_pretrained", return_value=MagicMock()
         ),
@@ -643,3 +644,84 @@ def test_load_model_uses_trust_remote_code(app):
         app.load_model("cpu")
         assert mock_cls.from_pretrained.call_args[1]["trust_remote_code"] is True
         assert mock_proc.from_pretrained.call_args[1]["trust_remote_code"] is True
+
+
+# --- load_presets ---
+
+
+def test_load_presets_valid_file(app, tmp_path):
+    presets_data = [
+        {
+            "name": "Test",
+            "template": {"field": "string"},
+            "examples": [],
+            "sample_text": "test input",
+        }
+    ]
+    f = tmp_path / "presets.json"
+    f.write_text(json.dumps(presets_data))
+    result = app.load_presets(str(f))
+    assert len(result) == 1
+    assert result[0]["name"] == "Test"
+
+
+def test_load_presets_missing_file(app, tmp_path):
+    result = app.load_presets(str(tmp_path / "nonexistent.json"))
+    assert len(result) == 1
+    assert result[0]["name"] == "Person"
+
+
+def test_load_presets_invalid_json(app, tmp_path):
+    f = tmp_path / "presets.json"
+    f.write_text("not json {{{")
+    result = app.load_presets(str(f))
+    assert len(result) == 1
+    assert result[0]["name"] == "Person"
+
+
+def test_load_presets_skips_invalid_entries(app, tmp_path):
+    presets_data = [
+        {
+            "name": "Good",
+            "template": {"f": "string"},
+            "examples": [],
+            "sample_text": "x",
+        },
+        {"name": "Bad"},
+        {
+            "name": "Also Good",
+            "template": {"g": "integer"},
+            "examples": [],
+            "sample_text": "y",
+        },
+    ]
+    f = tmp_path / "presets.json"
+    f.write_text(json.dumps(presets_data))
+    result = app.load_presets(str(f))
+    assert len(result) == 2
+    assert result[0]["name"] == "Good"
+    assert result[1]["name"] == "Also Good"
+
+
+def test_load_presets_non_list_root(app, tmp_path):
+    f = tmp_path / "presets.json"
+    f.write_text(json.dumps({"name": "Person"}))
+    result = app.load_presets(str(f))
+    assert len(result) == 1
+    assert result[0]["name"] == "Person"
+
+
+def test_load_presets_all_entries_invalid(app, tmp_path):
+    f = tmp_path / "presets.json"
+    f.write_text(json.dumps([{"name": "Bad"}, {"invalid": True}]))
+    result = app.load_presets(str(f))
+    assert len(result) == 1
+    assert result[0]["name"] == "Person"
+
+
+def test_load_presets_empty_list(app, tmp_path):
+    f = tmp_path / "presets.json"
+    f.write_text("[]")
+    result = app.load_presets(str(f))
+    assert len(result) == 1
+    assert result[0]["name"] == "Person"

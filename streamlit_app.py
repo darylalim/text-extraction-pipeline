@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import warnings
 
@@ -21,6 +22,8 @@ from utils import (
 
 warnings.filterwarnings("ignore", message=".*MPS: The constant padding.*")
 warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
+
+logger = logging.getLogger(__name__)
 
 MODEL_ID = "numind/NuExtract-2.0-4B"
 MAX_INPUT_TOKENS = 10_000
@@ -72,6 +75,48 @@ DEFAULT_EXAMPLES = json.dumps(
     ],
     indent=2,
 )
+
+
+@st.cache_data
+def load_presets(path="presets.json"):
+    """Load extraction presets from JSON file.
+
+    Returns list of valid presets. Falls back to a single Person preset
+    built from DEFAULT_TEMPLATE/DEFAULT_EXAMPLES if file is missing or invalid.
+    """
+    fallback = [
+        {
+            "name": "Person",
+            "template": json.loads(DEFAULT_TEMPLATE),
+            "examples": json.loads(DEFAULT_EXAMPLES),
+            "sample_text": "",
+        }
+    ]
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.warning("Failed to load presets from %s: %s", path, e)
+        return fallback
+
+    if not isinstance(data, list):
+        logger.warning("presets.json root is not a list, using fallback")
+        return fallback
+
+    valid = []
+    for i, entry in enumerate(data):
+        if (
+            isinstance(entry, dict)
+            and isinstance(entry.get("name"), str)
+            and isinstance(entry.get("template"), dict)
+            and isinstance(entry.get("examples"), list)
+            and isinstance(entry.get("sample_text"), str)
+        ):
+            valid.append(entry)
+        else:
+            logger.warning("Skipping invalid preset at index %d", i)
+
+    return valid if valid else fallback
 
 
 def get_device():
@@ -236,6 +281,29 @@ with st.sidebar:
         step=64,
         help="Maximum tokens to generate. Increase for complex templates.",
     )
+    presets = load_presets()
+    preset_names = [p["name"] for p in presets] + ["Custom"]
+
+    if "prev_preset" not in st.session_state:
+        st.session_state["prev_preset"] = "Custom"
+
+    selected_preset = st.selectbox(
+        "Load preset", preset_names, index=len(preset_names) - 1, key="preset_selector"
+    )
+
+    if selected_preset != st.session_state["prev_preset"]:
+        st.session_state["prev_preset"] = selected_preset
+        if selected_preset != "Custom":
+            preset = next(p for p in presets if p["name"] == selected_preset)
+            st.session_state["template_input"] = json.dumps(
+                preset["template"], indent=2
+            )
+            st.session_state["examples_input"] = json.dumps(
+                preset["examples"], indent=2
+            )
+            st.session_state["text_input"] = preset["sample_text"]
+            st.rerun()
+
     st.subheader("Template")
     if "template_input" not in st.session_state:
         st.session_state["template_input"] = DEFAULT_TEMPLATE
@@ -286,8 +354,10 @@ with st.sidebar:
             "or `[]` for arrays/multi-labels."
         )
     st.subheader("Examples")
+    if "examples_input" not in st.session_state:
+        st.session_state["examples_input"] = DEFAULT_EXAMPLES
     examples_str = st.text_area(
-        "ICL examples (JSON array)", value=DEFAULT_EXAMPLES, height=200
+        "ICL examples (JSON array)", height=200, key="examples_input"
     )
     examples_parsed, examples_error = parse_examples(examples_str)
     if examples_error:
