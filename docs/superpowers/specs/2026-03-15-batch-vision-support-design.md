@@ -68,13 +68,14 @@ extract_batch(
 - Splits `inputs` into chunks of `chunk_size`. Each chunk is processed as a true batched forward pass
 - For each chunk:
   - Builds messages per item (text-only, image-only, or image+context). The `context` field is the text portion of an image message — if an item has both `image` and `context`, the message content is `[{"type": "image", "image": image}, {"type": "text", "text": context}]`. If only `text` is set (no image), the message is `{"role": "user", "content": text}`. This matches the existing `extract()` behavior
-  - Calls `apply_chat_template` per item (tokenizer requirement)
+  - Calls `apply_chat_template` per item (tokenizer requirement), passing the same `template` and `examples` to every item's call. This means each formatted text includes the ICL examples, which contributes to token count
   - Passes all formatted texts to processor at once: `text=[formatted1, formatted2, ...]`
-  - Calls batched `process_all_vision_info` for all images in per-item order
+  - Calls batched `process_all_vision_info` for all images in per-item order. **Assumption:** text-only items (no image in message or examples) produce zero image placeholder tokens in their formatted text, so they don't consume images from the flat list. If image ICL examples are used, all items in the batch receive them via `apply_chat_template`, so the image-to-sequence mapping remains consistent
+  - Records each item's individual `input_len` (from `processor` output per item) before padding, storing as a list. These per-item lengths are needed for correct trimming and truncation detection after generation
   - Checks each item's token count against `MAX_INPUT_TOKENS`; items exceeding the limit are skipped (result set to `(None, False)`) and their indices collected for a warning
-  - Single `model.generate()` call with left-padded batch. **Prerequisite:** processor must be configured with `padding_side="left"` (already set in `load_model()`)
-  - Trims, decodes, and parses JSON per item independently
-  - On OOM (`RuntimeError` with "out of memory" in the message): retries that chunk's items one at a time sequentially; if a single item also OOMs, it is skipped with `(None, False)`
+  - Single `model.generate()` call with left-padded batch, using `do_sample=False, num_beams=1` (greedy decoding, same as current `extract()`). **Prerequisite:** processor must be configured with `padding_side="left"` (already set in `load_model()`)
+  - Trims output per item using that item's stored `input_len` to extract only generated tokens. Truncation detection per item: `generated_len == max_new_tokens`. Decodes and parses JSON per item independently
+  - On OOM (`RuntimeError` with "out of memory" in the message): calls `torch.cuda.empty_cache()` if on CUDA, then retries that chunk's items one at a time sequentially. If a single item also OOMs, calls `torch.cuda.empty_cache()` again and skips it with `(None, False)`
 - Returns aggregated list of `(dict|None, bool)` tuples across all chunks
 
 **`extract()` wrapper:**
@@ -141,13 +142,13 @@ Note: when `image` is provided, `input_content` maps to `context` (the text alon
 
 **Chunk size control:**
 - Image Batch tab: slider (1-8, default 4)
-- CSV tab: slider appears when image column is selected; text-only stays sequential per-row (chunk_size=1)
+- CSV tab: slider appears when image column is selected; text-only stays sequential per-row (chunk_size=1) because text inputs vary widely in length, making padding waste high and batching less beneficial
 
 **Prerequisites:**
 - Processor must be configured with `padding_side="left"` for correct batched generation (already set in `load_model()`)
 
 **Error handling:**
-- OOM: detected by catching `RuntimeError` and checking for "out of memory" in the error message. On OOM for a chunk, call `torch.cuda.empty_cache()` if on CUDA (no-op on other devices), then fall back to sequential processing for that chunk's items. If a single item also OOMs, it is skipped with `(None, False)`
+- OOM: detected by catching `RuntimeError` and checking for "out of memory" in the error message. On OOM for a chunk, call `torch.cuda.empty_cache()` if on CUDA, then fall back to sequential processing for that chunk's items. If a single item also OOMs, call `torch.cuda.empty_cache()` again and skip it with `(None, False)`
 - Token limit (`ValueError`) items: skipped, marked as `(None, False)`, indices collected for a warning
 
 ## Testing Strategy
