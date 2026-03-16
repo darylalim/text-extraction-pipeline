@@ -239,6 +239,26 @@ def _clear_device_cache(device):
         torch.mps.empty_cache()
 
 
+def _load_csv_image(value):
+    """Load an image from a URL or file path. Returns PIL Image or None."""
+    if not value or not str(value).strip():
+        return None
+    value = str(value).strip()
+    if value.lower() == "nan":
+        return None
+    if value.startswith(("http://", "https://")):
+        try:
+            from qwen_vl_utils import fetch_image
+
+            return fetch_image({"image": value})
+        except (OSError, ValueError, RuntimeError):
+            return None
+    try:
+        return Image.open(value)
+    except (OSError, ValueError):
+        return None
+
+
 def extract_batch(
     inputs,
     model,
@@ -765,17 +785,143 @@ with csv_tab:
                 "Select text column", options=df.columns.tolist()
             )
 
+            image_col_options = ["None"] + [
+                c for c in df.columns.tolist() if c != selected_column
+            ]
+            selected_image_column = st.selectbox(
+                "Select image column (optional)",
+                options=image_col_options,
+                key="csv_image_column",
+            )
+            use_images = selected_image_column != "None"
+
+            if use_images:
+                csv_batch_size = st.slider(
+                    "Batch size",
+                    min_value=1,
+                    max_value=8,
+                    value=4,
+                    step=1,
+                    key="csv_batch_size",
+                    help="Images per inference batch. Lower if running out of memory.",
+                )
+
             if st.button("Extract", type="primary", key="csv_extract"):
                 if not _has_config_errors(
                     template_error, examples_error, template_parsed
                 ):
-                    results = []
-                    progress_bar = st.progress(0, text="Starting...")
+                    converted = _convert_template_if_needed(json_str, source_format)
+                    if converted:
+                        template_str = converted
 
-                    with st.spinner("Extracting..."):
-                        converted = _convert_template_if_needed(json_str, source_format)
-                        if converted:
-                            template_str = converted
+                    if use_images:
+                        batch_inputs = []
+                        invalid_image_rows = []
+                        texts = df[selected_column].astype(str).tolist()
+                        img_vals = df[selected_image_column].astype(str).tolist()
+                        for i, (text_val, img_val) in enumerate(zip(texts, img_vals)):
+                            loaded_image = _load_csv_image(img_val)
+                            if loaded_image is not None:
+                                batch_inputs.append(
+                                    {
+                                        "text": None,
+                                        "image": loaded_image,
+                                        "context": text_val,
+                                    }
+                                )
+                            else:
+                                if img_val.strip() and img_val.lower() != "nan":
+                                    invalid_image_rows.append(i + 1)
+                                batch_inputs.append(
+                                    {
+                                        "text": text_val,
+                                        "image": None,
+                                        "context": None,
+                                    }
+                                )
+
+                        if invalid_image_rows:
+                            st.warning(
+                                f"Could not load images for rows: {invalid_image_rows}. "
+                                "Falling back to text-only for those rows."
+                            )
+
+                        progress_bar = st.progress(0, text="Starting...")
+                        results = None
+                        skipped_rows = []
+                        truncated_rows = []
+
+                        def update_csv_progress(completed, total):
+                            progress_bar.progress(
+                                completed / total,
+                                text=f"Processing {completed} of {total} rows...",
+                            )
+
+                        with st.spinner("Extracting..."):
+                            try:
+                                results_tuples = extract_batch(
+                                    batch_inputs,
+                                    model,
+                                    processor,
+                                    device,
+                                    template_str,
+                                    examples_parsed,
+                                    max_new_tokens=max_new_tokens,
+                                    chunk_size=csv_batch_size,
+                                    progress_callback=update_csv_progress,
+                                )
+                                results = [r for r, _ in results_tuples]
+                                truncated_rows = [
+                                    i + 1
+                                    for i, (_, trunc) in enumerate(results_tuples)
+                                    if trunc
+                                ]
+                            except RuntimeError as e:
+                                st.error(
+                                    f"Runtime error: {e}. Try reducing batch size."
+                                )
+
+                        if results is not None:
+                            progress_bar.progress(1.0, text="Done.")
+                            if skipped_rows:
+                                st.warning(
+                                    f"Rows skipped (input too long): {skipped_rows}"
+                                )
+                            if truncated_rows:
+                                st.warning(f"Rows possibly truncated: {truncated_rows}")
+
+                            fields = list(template_parsed.keys())
+                            for field in fields:
+                                df[field] = [
+                                    r.get(field, "") if r is not None else ""
+                                    for r in results
+                                ]
+
+                            st.write("Preview")
+                            st.dataframe(
+                                df[[selected_column] + fields].head(),
+                                width="stretch",
+                            )
+
+                            total = len(df)
+                            failed = sum(1 for r in results if r is None)
+
+                            col1, col2, col3 = st.columns(3)
+                            col1.metric("Total Rows", total)
+                            col2.metric("Extracted", total - failed)
+                            col3.metric("Failed", failed)
+
+                            base_name = uploaded_file.name.rsplit(".", 1)[0]
+                            st.download_button(
+                                label="Download",
+                                data=df.to_csv(index=False),
+                                file_name=f"{base_name}_extract.csv",
+                                mime="text/csv",
+                            )
+                    else:
+                        # Text-only: existing extract() loop preserved
+                        results = []
+                        progress_bar = st.progress(0, text="Starting...")
                         skipped_rows = []
                         truncated_rows = []
                         for i, text in enumerate(df[selected_column].astype(str)):
@@ -800,39 +946,40 @@ with csv_tab:
                                 text=f"Processing row {i + 1} of {len(df)}",
                             )
 
-                    progress_bar.progress(1.0, text="Done.")
-                    if skipped_rows:
-                        st.warning(f"Rows skipped (input too long): {skipped_rows}")
-                    if truncated_rows:
-                        st.warning(f"Rows possibly truncated: {truncated_rows}")
+                        progress_bar.progress(1.0, text="Done.")
+                        if skipped_rows:
+                            st.warning(f"Rows skipped (input too long): {skipped_rows}")
+                        if truncated_rows:
+                            st.warning(f"Rows possibly truncated: {truncated_rows}")
 
-                    fields = list(template_parsed.keys())
-                    for field in fields:
-                        df[field] = [
-                            r.get(field, "") if r is not None else "" for r in results
-                        ]
+                        fields = list(template_parsed.keys())
+                        for field in fields:
+                            df[field] = [
+                                r.get(field, "") if r is not None else ""
+                                for r in results
+                            ]
 
-                    st.write("Preview")
-                    st.dataframe(
-                        df[[selected_column] + fields].head(),
-                        width="stretch",
-                    )
+                        st.write("Preview")
+                        st.dataframe(
+                            df[[selected_column] + fields].head(),
+                            width="stretch",
+                        )
 
-                    total = len(df)
-                    failed = sum(1 for r in results if r is None)
+                        total = len(df)
+                        failed = sum(1 for r in results if r is None)
 
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Total Rows", total)
-                    col2.metric("Extracted", total - failed)
-                    col3.metric("Failed", failed)
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Total Rows", total)
+                        col2.metric("Extracted", total - failed)
+                        col3.metric("Failed", failed)
 
-                    base_name = uploaded_file.name.rsplit(".", 1)[0]
-                    st.download_button(
-                        label="Download",
-                        data=df.to_csv(index=False),
-                        file_name=f"{base_name}_extract.csv",
-                        mime="text/csv",
-                    )
+                        base_name = uploaded_file.name.rsplit(".", 1)[0]
+                        st.download_button(
+                            label="Download",
+                            data=df.to_csv(index=False),
+                            file_name=f"{base_name}_extract.csv",
+                            mime="text/csv",
+                        )
 
         except (pd.errors.ParserError, KeyError, UnicodeDecodeError) as e:
             st.error(f"Error: {e}")

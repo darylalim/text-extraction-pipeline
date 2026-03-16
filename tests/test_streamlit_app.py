@@ -1213,3 +1213,52 @@ def test_extract_wrapper_image_maps_to_context(app):
     assert batch_input["text"] is None
     assert batch_input["image"] is fake_image
     assert batch_input["context"] == "context text"
+
+
+# --- CSV image loading ---
+
+
+def test_load_csv_image_url(app):
+    fake_img = MagicMock(name="fetched_img")
+    with patch("qwen_vl_utils.fetch_image", return_value=fake_img) as mock_fetch:
+        result = app._load_csv_image("https://example.com/img.png")
+    assert result is fake_img
+    mock_fetch.assert_called_once_with({"image": "https://example.com/img.png"})
+
+
+def test_load_csv_image_http_url(app):
+    fake_img = MagicMock(name="fetched_img")
+    with patch("qwen_vl_utils.fetch_image", return_value=fake_img) as mock_fetch:
+        result = app._load_csv_image("http://example.com/img.png")
+    assert result is fake_img
+    mock_fetch.assert_called_once_with({"image": "http://example.com/img.png"})
+
+
+def test_load_csv_image_file_path(app, tmp_path):
+    from PIL import Image as PILImage
+
+    img_path = tmp_path / "test.png"
+    PILImage.new("RGB", (10, 10)).save(img_path)
+    result = app._load_csv_image(str(img_path))
+    assert result is not None
+    assert hasattr(result, "size")
+
+
+def test_load_csv_image_invalid_path(app):
+    result = app._load_csv_image("/nonexistent/path/image.png")
+    assert result is None
+
+
+def test_load_csv_image_empty_string(app):
+    result = app._load_csv_image("")
+    assert result is None
+
+
+def test_load_csv_image_nan(app):
+    result = app._load_csv_image("nan")
+    assert result is None
+
+
+def test_load_csv_image_none(app):
+    result = app._load_csv_image(None)
+    assert result is None
