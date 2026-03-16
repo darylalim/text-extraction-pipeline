@@ -623,6 +623,132 @@ with image_tab:
                     except RuntimeError as e:
                         st.error(f"Runtime error: {e}. Try reducing max tokens.")
 
+with image_batch_tab:
+    uploaded_images = st.file_uploader(
+        "Upload images",
+        type=["png", "jpg", "jpeg", "webp"],
+        accept_multiple_files=True,
+        key="image_batch_upload",
+    )
+    shared_context = st.text_area(
+        "Shared context (optional)", height=100, key="image_batch_context"
+    )
+
+    if uploaded_images:
+        with st.expander("Per-image context"):
+            per_image_contexts = {}
+            for img_file in uploaded_images:
+                per_image_contexts[img_file.name] = st.text_input(
+                    f"Context for {img_file.name}",
+                    value="",
+                    key=f"ctx_{img_file.name}",
+                )
+
+        batch_size = st.slider(
+            "Batch size",
+            min_value=1,
+            max_value=8,
+            value=4,
+            step=1,
+            key="image_batch_size",
+            help="Images per inference batch. Lower if running out of memory.",
+        )
+
+        if st.button("Extract", type="primary", key="image_batch_extract"):
+            if not _has_config_errors(template_error, examples_error, template_parsed):
+                converted = _convert_template_if_needed(json_str, source_format)
+                if converted:
+                    template_str = converted
+
+                pil_images = []
+                filenames = []
+                for img_file in uploaded_images:
+                    pil_images.append(Image.open(img_file))
+                    filenames.append(img_file.name)
+
+                batch_inputs = []
+                for i, pil_img in enumerate(pil_images):
+                    ctx = per_image_contexts.get(filenames[i], "").strip()
+                    if not ctx:
+                        ctx = shared_context.strip() if shared_context else None
+                    batch_inputs.append(
+                        {"text": None, "image": pil_img, "context": ctx or None}
+                    )
+
+                progress_bar = st.progress(0, text="Starting...")
+
+                def update_progress(completed, total):
+                    progress_bar.progress(
+                        completed / total,
+                        text=f"Processing {completed} of {total} images...",
+                    )
+
+                with st.spinner("Extracting..."):
+                    try:
+                        results = extract_batch(
+                            batch_inputs,
+                            model,
+                            processor,
+                            device,
+                            template_str,
+                            examples_parsed,
+                            max_new_tokens=max_new_tokens,
+                            chunk_size=batch_size,
+                            progress_callback=update_progress,
+                        )
+                    except RuntimeError as e:
+                        st.error(f"Runtime error: {e}. Try reducing batch size.")
+                        results = None
+
+                if results is not None:
+                    progress_bar.progress(1.0, text="Done.")
+                    truncated_items = []
+
+                    for i, (pil_img, (result, was_truncated)) in enumerate(
+                        zip(pil_images, results)
+                    ):
+                        if was_truncated:
+                            truncated_items.append(filenames[i])
+                        with st.expander(filenames[i], expanded=(i < 3)):
+                            st.image(pil_img, width=300)
+                            if result is not None:
+                                st.json(result)
+                            else:
+                                st.error("Extraction failed.")
+
+                    if truncated_items:
+                        st.warning(f"Possibly truncated: {truncated_items}")
+
+                    fields = list(template_parsed.keys())
+                    table_data = {"filename": filenames}
+                    for field in fields:
+                        table_data[field] = [
+                            r.get(field, "") if r is not None else ""
+                            for r, _ in results
+                        ]
+                    result_df = pd.DataFrame(table_data)
+
+                    st.write("Summary")
+                    st.dataframe(result_df, width="stretch")
+
+                    total = len(results)
+                    failed = sum(1 for r, _ in results if r is None)
+
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Total", total)
+                    col2.metric("Extracted", total - failed)
+                    col3.metric("Failed", failed)
+
+                    st.download_button(
+                        label="Download",
+                        data=result_df.to_csv(index=False),
+                        file_name="image_batch_extract.csv",
+                        mime="text/csv",
+                        key="image_batch_download",
+                    )
+    else:
+        st.info("Upload one or more images.")
+
 with csv_tab:
     uploaded_file = st.file_uploader(
         "Upload CSV file",
