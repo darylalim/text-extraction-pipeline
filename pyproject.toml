@@ -1,6 +1,6 @@
 [project]
 name = "nuextract-2-0-pipeline"
-version = "0.4.0"
+version = "0.5.0"
 description = "Structured extraction pipeline using NuExtract-2.0-4B with Streamlit UI"
 requires-python = ">=3.12"
 dependencies = [
