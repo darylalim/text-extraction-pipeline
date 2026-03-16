@@ -33,9 +33,12 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 - **`extract(..., image=None, max_new_tokens=DEFAULT_MAX_NEW_TOKENS)`** — Thin wrapper around `extract_batch()`; maps `input_content` to `text` (text-only) or `context` (with image); enforces `MAX_INPUT_TOKENS` limit (raises `ValueError`); returns `(result, was_truncated)`
 - **`extract_batch(inputs, ..., chunk_size=4, progress_callback=None)`** — Core batch inference function; accepts list of `{"text", "image", "context"}` dicts; processes in chunks via `_process_chunk`; OOM fallback retries items sequentially with `_clear_device_cache`; token limit violations skip items in batch mode, raise `ValueError` in single-item mode; returns `list[(dict|None, bool)]`
 - **`_build_message(item)`** — Builds chat message from batch input dict (text-only, image-only, or image+context)
-- **`_process_chunk(...)`** — Processes a single chunk as a batched forward pass; handles OOM and ValueError fallback to sequential
+- **`_process_chunk(...)`** — Processes a single chunk as a batched forward pass; delegates to `_sequential_fallback` on OOM or ValueError
+- **`_sequential_fallback(...)`** — Retries each item individually after a batch failure; catches ValueError and OOM RuntimeError per item; clears device cache on OOM
 - **`_run_batch_inference(...)`** — Runs batched model inference: collects images, tokenizes, checks token limits post-processor, generates, trims by `padded_input_len`, decodes, parses JSON per item
 - **`_clear_device_cache(device)`** — Clears GPU memory cache (CUDA/MPS) after OOM errors
+- **`_run_single_extraction(...)`** — Runs single extraction and displays results; handles truncation warning, JSON parse failure, ValueError, and RuntimeError; used by Text and Image tabs
+- **`_display_csv_results(df, results, ...)`** — Displays CSV extraction results: skipped/truncated warnings, preview dataframe, metrics (Total/Extracted/Failed), download button; used by both CSV Batch paths
 - **`_load_csv_image(value)`** — Loads image from URL or file path for CSV batch; handles NaN, empty, and invalid inputs; returns PIL Image or `None`
 - **`_has_config_errors(template_error, examples_error, template_parsed)`** — Shows first config error via `st.error` and returns `True`, or returns `False` if none
 - **`_convert_template_if_needed(json_str, source_format)`** — Converts YAML/Pydantic template to JSON and updates session state on Extract
@@ -43,7 +46,7 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 - **Text tab** — Single text input with Extract button
 - **Image tab** — Single image upload with optional context text
 - **Image Batch tab** — Multi-image upload with shared/per-image context overrides; configurable batch size (1–8, default 4); results as expandable cards + summary dataframe with metrics and CSV download
-- **CSV Batch tab** — CSV upload with text column selector and optional image column selector; when image column selected, uses `extract_batch()` with configurable batch size; text-only mode uses sequential `extract()` loop
+- **CSV Batch tab** — CSV upload with text column selector and optional image column selector; both text-only and image modes use `extract_batch()` with configurable batch size (1–8, default 4)
 - **Warning suppression** — Filters known MPS padding warnings
 
 ### `utils.py`
@@ -59,7 +62,7 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 
 5 extraction presets (Person, Job Posting, Invoice, Product, Scientific Paper) with templates, ICL examples, and sample text. Loaded by `load_presets()` at app startup.
 
-Tests in `tests/test_streamlit_app.py` (89 tests) and `tests/test_utils.py` (35 tests).
+Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.py` (102 tests) and `tests/test_utils.py` (35 tests).
 
 ## Key Details
 

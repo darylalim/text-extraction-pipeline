@@ -49,7 +49,8 @@ streamlit_app.py          # Main app — UI, validation, extraction
 utils.py                  # Utilities — template detection, generation, vision processing
 presets.json              # 5 built-in extraction presets
 tests/
-  test_streamlit_app.py   # Tests for main app (89 tests)
+  conftest.py             # Shared test fixtures and mock helpers
+  test_streamlit_app.py   # Tests for main app (102 tests)
   test_utils.py           # Tests for utilities (35 tests)
   data/csv/               # Sample test data
 ```
