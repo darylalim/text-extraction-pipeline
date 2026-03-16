@@ -70,6 +70,79 @@ def make_mocks(decode_output):
     return model, processor
 
 
+def make_batch_mocks(decode_outputs, input_lengths=None):
+    """Create mock model and processor for batch inference.
+
+    decode_outputs: list of decoded strings, one per batch item.
+    input_lengths: list of non-padded token counts per item. Defaults to [5]*n.
+    """
+    n = len(decode_outputs)
+    if input_lengths is None:
+        input_lengths = [5] * n
+    max_len = max(input_lengths) if input_lengths else 0
+    gen_tokens = 3
+
+    processor = MagicMock()
+
+    # Left-padded input_ids and attention_mask
+    input_ids = (
+        torch.ones(n, max_len, dtype=torch.long)
+        if n > 0
+        else torch.ones(0, 0, dtype=torch.long)
+    )
+    attention_mask = (
+        torch.zeros(n, max_len, dtype=torch.long)
+        if n > 0
+        else torch.zeros(0, 0, dtype=torch.long)
+    )
+    for i, length in enumerate(input_lengths):
+        pad = max_len - length
+        attention_mask[i, pad:] = 1
+
+    # Track which call we're on (for chunk_size=1 scenarios)
+    call_counter = [0]
+
+    def make_proc_result(text_arg):
+        """Return processor result sized to the number of texts passed."""
+        batch_n = len(text_arg) if isinstance(text_arg, list) else n
+        if batch_n == n:
+            ids = input_ids
+            mask = attention_mask
+        else:
+            # Map call to correct rows for single-item chunks
+            start = call_counter[0]
+            end = min(start + batch_n, n)
+            ids = input_ids[start:end]
+            mask = attention_mask[start:end]
+            if ids.shape[0] < batch_n:
+                ids = input_ids[:batch_n]
+                mask = attention_mask[:batch_n]
+            call_counter[0] = end
+        result_dict = {"input_ids": ids, "attention_mask": mask}
+        proc_mock = MagicMock()
+        proc_mock.to.return_value = result_dict
+        return proc_mock
+
+    def proc_side_effect(*args, **kwargs):
+        text_arg = kwargs.get("text", args[0] if args else [])
+        return make_proc_result(text_arg)
+
+    processor.side_effect = proc_side_effect
+    processor.tokenizer.apply_chat_template.return_value = "formatted prompt"
+    processor.batch_decode.return_value = decode_outputs
+
+    model = MagicMock()
+    if n > 0:
+        output = torch.cat(
+            [input_ids, torch.ones(n, gen_tokens, dtype=torch.long) * 10], dim=1
+        )
+    else:
+        output = torch.ones(0, 0, dtype=torch.long)
+    model.generate.return_value = output
+
+    return model, processor
+
+
 # --- Constants ---
 
 
@@ -819,3 +892,278 @@ def test_clear_device_cache_cpu_is_noop(app):
     with patch("streamlit_app.torch") as mock_torch:
         app._clear_device_cache("cpu")
         mock_torch.cuda.empty_cache.assert_not_called()
+
+
+# --- extract_batch ---
+
+
+def test_extract_batch_two_text_items(app):
+    outputs = [
+        json.dumps({"company": "Acme", "revenue": "$1B"}),
+        json.dumps({"company": "Beta", "revenue": "$2B"}),
+    ]
+    model, processor = make_batch_mocks(outputs)
+    inputs = [
+        {"text": "Acme text", "image": None, "context": None},
+        {"text": "Beta text", "image": None, "context": None},
+    ]
+    results = app.extract_batch(
+        inputs, model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+    )
+    assert len(results) == 2
+    assert results[0][0] == {"company": "Acme", "revenue": "$1B"}
+    assert results[1][0] == {"company": "Beta", "revenue": "$2B"}
+
+
+def test_extract_batch_empty_inputs(app):
+    model, processor = make_batch_mocks([])
+    results = app.extract_batch(
+        [], model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+    )
+    assert results == []
+    model.generate.assert_not_called()
+
+
+def test_extract_batch_with_image_and_context(app):
+    outputs = [json.dumps({"company": "Acme"})]
+    model, processor = make_batch_mocks(outputs)
+    fake_image = MagicMock()
+
+    with patch(
+        "streamlit_app.process_all_vision_info",
+        return_value=[MagicMock()],
+    ):
+        inputs = [{"text": None, "image": fake_image, "context": "some context"}]
+        results = app.extract_batch(
+            inputs, model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+        )
+
+    assert results[0][0] == {"company": "Acme"}
+    call_args = processor.tokenizer.apply_chat_template.call_args
+    messages = call_args[0][0]
+    content = messages[0]["content"]
+    assert content[0]["type"] == "image"
+    assert content[1] == {"type": "text", "text": "some context"}
+
+
+def test_extract_batch_image_without_context(app):
+    outputs = [json.dumps({"company": "Acme"})]
+    model, processor = make_batch_mocks(outputs)
+    fake_image = MagicMock()
+
+    with patch(
+        "streamlit_app.process_all_vision_info",
+        return_value=[MagicMock()],
+    ):
+        inputs = [{"text": None, "image": fake_image, "context": None}]
+        results = app.extract_batch(
+            inputs, model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+        )
+
+    assert results[0][0] == {"company": "Acme"}
+    call_args = processor.tokenizer.apply_chat_template.call_args
+    messages = call_args[0][0]
+    content = messages[0]["content"]
+    assert len(content) == 1
+    assert content[0]["type"] == "image"
+
+
+def test_extract_batch_token_limit_skips_item(app):
+    outputs = [
+        json.dumps({"company": "Acme"}),
+        json.dumps({"company": "Beta"}),
+    ]
+    model, processor = make_batch_mocks(outputs, input_lengths=[5, 10_001])
+
+    inputs = [
+        {"text": "short", "image": None, "context": None},
+        {"text": "very long text", "image": None, "context": None},
+    ]
+    results = app.extract_batch(
+        inputs, model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES, chunk_size=1
+    )
+    assert len(results) == 2
+    assert results[0][0] == {"company": "Acme"}
+    assert results[1] == (None, False)
+
+
+def test_extract_batch_truncation_detection(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = make_batch_mocks([output])
+    results = app.extract_batch(
+        [{"text": "text", "image": None, "context": None}],
+        model,
+        processor,
+        "cpu",
+        TEST_TEMPLATE,
+        TEST_EXAMPLES,
+        max_new_tokens=3,
+    )
+    assert results[0][1] is True
+
+
+def test_extract_batch_no_truncation(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = make_batch_mocks([output])
+    results = app.extract_batch(
+        [{"text": "text", "image": None, "context": None}],
+        model,
+        processor,
+        "cpu",
+        TEST_TEMPLATE,
+        TEST_EXAMPLES,
+        max_new_tokens=100,
+    )
+    assert results[0][1] is False
+
+
+def test_extract_batch_oom_falls_back_to_sequential(app):
+    outputs = [
+        json.dumps({"company": "Acme"}),
+        json.dumps({"company": "Beta"}),
+    ]
+    model, processor = make_batch_mocks(outputs)
+
+    call_count = [0]
+    single_output_a = torch.tensor([[1, 2, 3, 4, 5, 10, 20, 30]])
+    single_output_b = torch.tensor([[1, 2, 3, 4, 5, 11, 21, 31]])
+
+    def generate_side_effect(**kwargs):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise RuntimeError("CUDA out of memory")
+        if call_count[0] == 2:
+            return single_output_a
+        return single_output_b
+
+    model.generate.side_effect = generate_side_effect
+
+    single_input_ids = torch.tensor([[1, 2, 3, 4, 5]])
+    single_inputs = {
+        "input_ids": single_input_ids,
+        "attention_mask": torch.ones_like(single_input_ids),
+    }
+    single_proc = MagicMock()
+    single_proc.to.return_value = single_inputs
+
+    proc_call_count = [0]
+    original_proc = processor.return_value
+
+    def proc_side_effect(*args, **kwargs):
+        proc_call_count[0] += 1
+        if proc_call_count[0] == 1:
+            return original_proc
+        return single_proc
+
+    processor.side_effect = proc_side_effect
+    processor.batch_decode.side_effect = [
+        [json.dumps({"company": "Acme"})],
+        [json.dumps({"company": "Beta"})],
+    ]
+
+    with patch("streamlit_app._clear_device_cache"):
+        inputs = [
+            {"text": "text1", "image": None, "context": None},
+            {"text": "text2", "image": None, "context": None},
+        ]
+        results = app.extract_batch(
+            inputs, model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES, chunk_size=2
+        )
+
+    assert len(results) == 2
+    assert results[0][0] == {"company": "Acme"}
+    assert results[1][0] == {"company": "Beta"}
+
+
+def test_extract_batch_single_item(app):
+    output = json.dumps({"company": "Acme", "revenue": "$1B"})
+    model, processor = make_batch_mocks([output])
+    inputs = [{"text": "some text", "image": None, "context": None}]
+    results = app.extract_batch(
+        inputs, model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+    )
+    assert len(results) == 1
+    assert results[0][0] == {"company": "Acme", "revenue": "$1B"}
+
+
+def test_extract_batch_progress_callback(app):
+    outputs = [
+        json.dumps({"company": "A"}),
+        json.dumps({"company": "B"}),
+        json.dumps({"company": "C"}),
+    ]
+    model, processor = make_batch_mocks(outputs)
+    callback = MagicMock()
+
+    inputs = [
+        {"text": "t1", "image": None, "context": None},
+        {"text": "t2", "image": None, "context": None},
+        {"text": "t3", "image": None, "context": None},
+    ]
+    app.extract_batch(
+        inputs,
+        model,
+        processor,
+        "cpu",
+        TEST_TEMPLATE,
+        TEST_EXAMPLES,
+        chunk_size=2,
+        progress_callback=callback,
+    )
+    assert callback.call_count == 2
+    callback.assert_any_call(2, 3)
+    callback.assert_any_call(3, 3)
+
+
+def test_extract_batch_mixed_text_and_image(app):
+    outputs = [
+        json.dumps({"company": "Acme"}),
+        json.dumps({"company": "Beta"}),
+    ]
+    model, processor = make_batch_mocks(outputs)
+    fake_image = MagicMock()
+
+    with patch(
+        "streamlit_app.process_all_vision_info",
+        return_value=[MagicMock()],
+    ):
+        inputs = [
+            {"text": "text only input", "image": None, "context": None},
+            {"text": None, "image": fake_image, "context": "image context"},
+        ]
+        results = app.extract_batch(
+            inputs, model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+        )
+
+    assert len(results) == 2
+    assert results[0][0] == {"company": "Acme"}
+    assert results[1][0] == {"company": "Beta"}
+
+
+def test_extract_batch_different_input_lengths(app):
+    outputs = [
+        json.dumps({"company": "Acme"}),
+        json.dumps({"company": "Beta"}),
+    ]
+    model, processor = make_batch_mocks(outputs, input_lengths=[3, 7])
+
+    inputs = [
+        {"text": "short", "image": None, "context": None},
+        {"text": "much longer text input", "image": None, "context": None},
+    ]
+    results = app.extract_batch(
+        inputs, model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES
+    )
+    assert len(results) == 2
+    assert results[0][0] == {"company": "Acme"}
+    assert results[1][0] == {"company": "Beta"}
+
+
+def test_extract_batch_passes_template_and_examples(app):
+    output = json.dumps({"company": "Acme"})
+    model, processor = make_batch_mocks([output])
+    inputs = [{"text": "text", "image": None, "context": None}]
+    app.extract_batch(inputs, model, processor, "cpu", TEST_TEMPLATE, TEST_EXAMPLES)
+    call_args = processor.tokenizer.apply_chat_template.call_args
+    assert call_args[1]["template"] == TEST_TEMPLATE
+    assert call_args[1]["examples"] == TEST_EXAMPLES

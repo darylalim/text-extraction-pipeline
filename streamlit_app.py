@@ -268,6 +268,195 @@ def _clear_device_cache(device):
         torch.mps.empty_cache()
 
 
+def extract_batch(
+    inputs,
+    model,
+    processor,
+    device,
+    template,
+    examples,
+    max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
+    chunk_size=4,
+    progress_callback=None,
+):
+    if not inputs:
+        return []
+
+    all_results = []
+    total = len(inputs)
+
+    for chunk_start in range(0, total, chunk_size):
+        chunk = inputs[chunk_start : chunk_start + chunk_size]
+        try:
+            chunk_results = _process_chunk(
+                chunk, model, processor, device, template, examples, max_new_tokens
+            )
+        except ValueError:
+            chunk_results = [(None, False)] * len(chunk)
+        all_results.extend(chunk_results)
+        if progress_callback:
+            progress_callback(len(all_results), total)
+
+    return all_results
+
+
+def _build_message(item):
+    """Build a chat message from a batch input dict."""
+    if item.get("image") is not None:
+        content = [{"type": "image", "image": item["image"]}]
+        if item.get("context"):
+            content.append({"type": "text", "text": item["context"]})
+        return [{"role": "user", "content": content}]
+    return [{"role": "user", "content": item["text"]}]
+
+
+def _process_chunk(chunk, model, processor, device, template, examples, max_new_tokens):
+    """Process a single chunk of inputs as a batched forward pass."""
+    all_messages = []
+    formatted_texts = []
+    results = [(None, False)] * len(chunk)
+
+    for i, item in enumerate(chunk):
+        messages = _build_message(item)
+        formatted = processor.tokenizer.apply_chat_template(
+            messages,
+            template=template,
+            examples=examples,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        all_messages.append(messages)
+        formatted_texts.append(formatted)
+
+    try:
+        batch_results = _run_batch_inference(
+            all_messages,
+            formatted_texts,
+            model,
+            processor,
+            device,
+            examples,
+            max_new_tokens,
+        )
+        for i, res in enumerate(batch_results):
+            results[i] = res
+    except ValueError:
+        if len(chunk) == 1:
+            # Single item (from extract() wrapper): propagate ValueError
+            raise
+        # Multi-item batch: fall back to one-at-a-time
+        for i, (messages, formatted) in enumerate(zip(all_messages, formatted_texts)):
+            try:
+                results[i] = _run_batch_inference(
+                    [messages],
+                    [formatted],
+                    model,
+                    processor,
+                    device,
+                    examples,
+                    max_new_tokens,
+                )[0]
+            except ValueError:
+                results[i] = (None, False)
+            except RuntimeError as e2:
+                if "out of memory" not in str(e2).lower():
+                    raise
+                _clear_device_cache(device)
+                results[i] = (None, False)
+    except RuntimeError as e:
+        if "out of memory" not in str(e).lower():
+            raise
+        _clear_device_cache(device)
+        # Fallback: process each item sequentially
+        for i, (messages, formatted) in enumerate(zip(all_messages, formatted_texts)):
+            try:
+                results[i] = _run_batch_inference(
+                    [messages],
+                    [formatted],
+                    model,
+                    processor,
+                    device,
+                    examples,
+                    max_new_tokens,
+                )[0]
+            except (ValueError, RuntimeError) as e2:
+                if (
+                    isinstance(e2, RuntimeError)
+                    and "out of memory" not in str(e2).lower()
+                ):
+                    raise
+                if isinstance(e2, RuntimeError):
+                    _clear_device_cache(device)
+                results[i] = (None, False)
+
+    return results
+
+
+def _run_batch_inference(
+    all_messages, formatted_texts, model, processor, device, examples, max_new_tokens
+):
+    """Run batched inference on pre-formatted texts. Returns list of (dict|None, bool).
+
+    Raises ValueError if any item exceeds MAX_INPUT_TOKENS (checked post-processor,
+    matching the original extract() behavior).
+    """
+    # Collect images
+    batched_messages = list(all_messages)
+    image_inputs = process_all_vision_info(batched_messages, examples)
+
+    inputs = processor(
+        text=formatted_texts,
+        images=image_inputs,
+        padding=True,
+        return_tensors="pt",
+    ).to(device)
+
+    # Use padded input length for trimming (same for all items after left-padding)
+    padded_input_len = inputs["input_ids"].shape[1]
+
+    # Per-item token counts from attention mask for limit checking
+    n = len(formatted_texts)
+    all_lens = inputs["attention_mask"].sum(dim=1).tolist()
+    input_lens = all_lens[:n]
+    over_limit = [
+        (i, int(tl)) for i, tl in enumerate(input_lens) if int(tl) > MAX_INPUT_TOKENS
+    ]
+    if over_limit:
+        if len(formatted_texts) == 1:
+            _, count = over_limit[0]
+            raise ValueError(
+                f"Input too long: {count} tokens (limit: {MAX_INPUT_TOKENS})."
+            )
+        raise ValueError(f"Items exceed {MAX_INPUT_TOKENS} token limit: {over_limit}")
+
+    with torch.inference_mode():
+        output = model.generate(
+            **inputs,
+            do_sample=False,
+            num_beams=1,
+            max_new_tokens=max_new_tokens,
+        )
+
+    trimmed = output[:, padded_input_len:]
+    decoded_list = processor.batch_decode(
+        trimmed,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False,
+    )
+
+    results = []
+    for i in range(len(formatted_texts)):
+        generated_len = trimmed[i].shape[0]
+        was_truncated = generated_len == max_new_tokens
+        try:
+            parsed = json.loads(decoded_list[i])
+            results.append((parsed, was_truncated))
+        except (json.JSONDecodeError, IndexError):
+            results.append((None, was_truncated))
+
+    return results
+
+
 # --- Streamlit UI ---
 
 st.title("Text Extraction Pipeline")

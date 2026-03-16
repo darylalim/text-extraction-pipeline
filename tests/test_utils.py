@@ -351,8 +351,18 @@ def test_process_all_vision_info_batch_single_examples_broadcast():
     fake_msg_img2 = MagicMock(name="msg_img2")
 
     messages = [
-        [{"role": "user", "content": [{"type": "image", "image": "https://example.com/1.png"}]}],
-        [{"role": "user", "content": [{"type": "image", "image": "https://example.com/2.png"}]}],
+        [
+            {
+                "role": "user",
+                "content": [{"type": "image", "image": "https://example.com/1.png"}],
+            }
+        ],
+        [
+            {
+                "role": "user",
+                "content": [{"type": "image", "image": "https://example.com/2.png"}],
+            }
+        ],
     ]
     examples = [
         {
