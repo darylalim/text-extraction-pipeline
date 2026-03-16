@@ -21,7 +21,6 @@ from utils import (
 )
 
 warnings.filterwarnings("ignore", message=".*MPS: The constant padding.*")
-warnings.filterwarnings("ignore", message=".*generation flags are not valid.*")
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +136,7 @@ def load_model(device):
         device_map=device,
         token=token,
     )
+    model.generation_config.temperature = None
     processor = AutoProcessor.from_pretrained(
         MODEL_ID,
         trust_remote_code=True,
