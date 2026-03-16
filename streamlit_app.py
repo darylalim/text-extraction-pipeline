@@ -282,7 +282,10 @@ def _display_csv_results(
     selected_column,
     filename,
 ):
-    """Display CSV extraction results with preview, metrics, and download."""
+    """Display CSV extraction results with preview, metrics, and download.
+
+    Modifies df in-place by adding extracted fields as new columns.
+    """
     if skipped_rows:
         st.warning(f"Rows skipped (input too long): {skipped_rows}")
     if truncated_rows:
@@ -706,8 +709,7 @@ with image_batch_tab:
         if st.button("Extract", type="primary", key="image_batch_extract"):
             if not _has_config_errors(template_error, examples_error, template_parsed):
                 effective = (
-                    _convert_template_if_needed(json_str, source_format)
-                    or template_str
+                    _convert_template_if_needed(json_str, source_format) or template_str
                 )
 
                 pil_images = []
