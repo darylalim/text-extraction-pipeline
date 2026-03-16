@@ -705,9 +705,10 @@ with image_batch_tab:
 
         if st.button("Extract", type="primary", key="image_batch_extract"):
             if not _has_config_errors(template_error, examples_error, template_parsed):
-                converted = _convert_template_if_needed(json_str, source_format)
-                if converted:
-                    template_str = converted
+                effective = (
+                    _convert_template_if_needed(json_str, source_format)
+                    or template_str
+                )
 
                 pil_images = []
                 filenames = []
@@ -739,7 +740,7 @@ with image_batch_tab:
                             model,
                             processor,
                             device,
-                            template_str,
+                            effective,
                             examples_parsed,
                             max_new_tokens=max_new_tokens,
                             chunk_size=batch_size,
