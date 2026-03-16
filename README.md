@@ -50,7 +50,7 @@ utils.py                  # Utilities — template detection, generation, vision
 presets.json              # 5 built-in extraction presets
 tests/
   conftest.py             # Shared test fixtures and mock helpers
-  test_streamlit_app.py   # Tests for main app (102 tests)
+  test_streamlit_app.py   # Tests for main app (103 tests)
   test_utils.py           # Tests for utilities (35 tests)
   data/csv/               # Sample test data
 ```

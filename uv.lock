@@ -537,7 +537,7 @@ wheels = [
 
 [[package]]
 name = "nuextract-2-0-pipeline"
-version = "0.5.0"
+version = "0.5.1"
 source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },

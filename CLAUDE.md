@@ -27,7 +27,7 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 - **Constants** — `MODEL_ID`, `MAX_INPUT_TOKENS`, `DEFAULT_TEMPLATE`, `DEFAULT_EXAMPLES`
 - **`load_presets(path)`** — Loads extraction presets from JSON file; cached via `@st.cache_data`; falls back to Person preset if file missing or invalid
 - **`get_device()`** — Auto-detects compute: MPS → CUDA → CPU
-- **`load_model(device)`** — Loads model and processor in BF16; cached via `@st.cache_resource`
+- **`load_model(device)`** — Loads model and processor in BF16; clears `temperature` from generation config to suppress invalid flag warnings; cached via `@st.cache_resource`
 - **`validate_template(template_str)`** — Validates JSON string is a non-empty dict; returns `(parsed, error)`
 - **`parse_examples(examples_str)`** — Validates JSON array of `{"input", "output"}` objects; input can be a string (text) or dict with `{"type": "image", "image": url}` for image examples; returns `(list, error)`
 - **`extract(..., image=None, max_new_tokens=DEFAULT_MAX_NEW_TOKENS)`** — Thin wrapper around `extract_batch()`; maps `input_content` to `text` (text-only) or `context` (with image); enforces `MAX_INPUT_TOKENS` limit (raises `ValueError`); returns `(result, was_truncated)`
@@ -47,7 +47,7 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 - **Image tab** — Single image upload with optional context text
 - **Image Batch tab** — Multi-image upload with shared/per-image context overrides; configurable batch size (1–8, default 4); results as expandable cards + summary dataframe with metrics and CSV download
 - **CSV Batch tab** — CSV upload with text column selector and optional image column selector; both text-only and image modes use `extract_batch()` with configurable batch size (1–8, default 4)
-- **Warning suppression** — Filters known MPS padding warnings
+- **Warning suppression** — Filters known MPS padding warnings via `warnings.filterwarnings`
 
 ### `utils.py`
 
@@ -62,7 +62,7 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 
 5 extraction presets (Person, Job Posting, Invoice, Product, Scientific Paper) with templates, ICL examples, and sample text. Loaded by `load_presets()` at app startup.
 
-Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.py` (102 tests) and `tests/test_utils.py` (35 tests).
+Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.py` (103 tests) and `tests/test_utils.py` (35 tests).
 
 ## Key Details
 
