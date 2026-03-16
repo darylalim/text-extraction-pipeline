@@ -153,71 +153,18 @@ def test_parse_examples_image_input_accepted(app):
     assert error is None
 
 
-def test_parse_examples_image_input_missing_image_key(app):
-    examples_str = json.dumps(
-        [
-            {
-                "input": {"type": "image"},
-                "output": '{"name": "John"}',
-            }
-        ]
-    )
-    parsed, error = app.parse_examples(examples_str)
-    assert parsed is None
-    assert error is not None
-
-
-def test_parse_examples_image_input_non_http_url_rejected(app):
-    examples_str = json.dumps(
-        [
-            {
-                "input": {"type": "image", "image": "file:///etc/passwd"},
-                "output": '{"name": "John"}',
-            }
-        ]
-    )
-    parsed, error = app.parse_examples(examples_str)
-    assert parsed is None
-    assert error is not None
-
-
-def test_parse_examples_image_input_wrong_type(app):
-    examples_str = json.dumps(
-        [
-            {
-                "input": {"type": "video", "image": "https://example.com/vid.mp4"},
-                "output": '{"name": "John"}',
-            }
-        ]
-    )
-    parsed, error = app.parse_examples(examples_str)
-    assert parsed is None
-    assert "image" in error.lower()
-
-
-def test_parse_examples_image_input_empty_url(app):
-    examples_str = json.dumps(
-        [
-            {
-                "input": {"type": "image", "image": ""},
-                "output": '{"name": "John"}',
-            }
-        ]
-    )
-    parsed, error = app.parse_examples(examples_str)
-    assert parsed is None
-    assert error is not None
-
-
-def test_parse_examples_image_input_non_string_url(app):
-    examples_str = json.dumps(
-        [
-            {
-                "input": {"type": "image", "image": 12345},
-                "output": '{"name": "John"}',
-            }
-        ]
-    )
+@pytest.mark.parametrize(
+    "input_dict",
+    [
+        {"type": "image"},
+        {"type": "image", "image": ""},
+        {"type": "image", "image": 12345},
+        {"type": "image", "image": "file:///etc/passwd"},
+        {"type": "video", "image": "https://example.com/vid.mp4"},
+    ],
+)
+def test_parse_examples_invalid_image_input(app, input_dict):
+    examples_str = json.dumps([{"input": input_dict, "output": '{"name": "John"}'}])
     parsed, error = app.parse_examples(examples_str)
     assert parsed is None
     assert error is not None
@@ -275,40 +222,18 @@ def test_has_config_errors_no_template_parsed(app):
 # --- _convert_template_if_needed ---
 
 
-def test_convert_template_yaml(app):
+@pytest.mark.parametrize("fmt", ["yaml", "pydantic", "pydantic_with_unknown"])
+def test_convert_template_converts_non_json(app, fmt):
     with patch("streamlit_app.st") as mock_st:
         mock_st.session_state = {}
-        result = app._convert_template_if_needed('{"name": "string"}', "yaml")
+        result = app._convert_template_if_needed('{"name": "string"}', fmt)
         assert result == '{"name": "string"}'
         assert mock_st.session_state["template_input"] == '{"name": "string"}'
 
 
-def test_convert_template_pydantic(app):
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.session_state = {}
-        result = app._convert_template_if_needed('{"name": "string"}', "pydantic")
-        assert result == '{"name": "string"}'
-        assert mock_st.session_state["template_input"] == '{"name": "string"}'
-
-
-def test_convert_template_pydantic_with_unknown(app):
-    with patch("streamlit_app.st") as mock_st:
-        mock_st.session_state = {}
-        result = app._convert_template_if_needed(
-            '{"name": "string"}', "pydantic_with_unknown"
-        )
-        assert result == '{"name": "string"}'
-        assert mock_st.session_state["template_input"] == '{"name": "string"}'
-
-
-def test_convert_template_json_returns_none(app):
-    result = app._convert_template_if_needed('{"name": "string"}', "json")
-    assert result is None
-
-
-def test_convert_template_none_format_returns_none(app):
-    result = app._convert_template_if_needed(None, None)
-    assert result is None
+@pytest.mark.parametrize("fmt", ["json", None])
+def test_convert_template_returns_none(app, fmt):
+    assert app._convert_template_if_needed('{"name": "string"}', fmt) is None
 
 
 # --- extract ---
@@ -613,25 +538,20 @@ def test_extract_image_with_image_examples_calls_process_all(app):
 # --- get_device ---
 
 
-def test_get_device_prefers_mps(app):
-    with patch("torch.backends.mps.is_available", return_value=True):
-        assert app.get_device() == "mps"
-
-
-def test_get_device_falls_back_to_cuda(app):
+@pytest.mark.parametrize(
+    "mps,cuda,expected",
+    [
+        (True, False, "mps"),
+        (False, True, "cuda"),
+        (False, False, "cpu"),
+    ],
+)
+def test_get_device(app, mps, cuda, expected):
     with (
-        patch("torch.backends.mps.is_available", return_value=False),
-        patch("torch.cuda.is_available", return_value=True),
+        patch("torch.backends.mps.is_available", return_value=mps),
+        patch("torch.cuda.is_available", return_value=cuda),
     ):
-        assert app.get_device() == "cuda"
-
-
-def test_get_device_falls_back_to_cpu(app):
-    with (
-        patch("torch.backends.mps.is_available", return_value=False),
-        patch("torch.cuda.is_available", return_value=False),
-    ):
-        assert app.get_device() == "cpu"
+        assert app.get_device() == expected
 
 
 # --- load_model ---
@@ -708,16 +628,24 @@ def test_load_presets_valid_file(app, tmp_path):
     assert result[0]["name"] == "Test"
 
 
-def test_load_presets_missing_file(app, tmp_path):
-    result = app.load_presets(str(tmp_path / "nonexistent.json"))
-    assert len(result) == 1
-    assert result[0]["name"] == "Person"
-
-
-def test_load_presets_invalid_json(app, tmp_path):
-    f = tmp_path / "presets.json"
-    f.write_text("not json {{{")
-    result = app.load_presets(str(f))
+@pytest.mark.parametrize(
+    "content",
+    [
+        None,
+        "not json {{{",
+        '{"name": "Person"}',
+        '[{"name": "Bad"}, {"invalid": true}]',
+        "[]",
+    ],
+)
+def test_load_presets_fallback(app, tmp_path, content):
+    if content is None:
+        path = str(tmp_path / "nonexistent.json")
+    else:
+        f = tmp_path / "presets.json"
+        f.write_text(content)
+        path = str(f)
+    result = app.load_presets(path)
     assert len(result) == 1
     assert result[0]["name"] == "Person"
 
@@ -746,30 +674,6 @@ def test_load_presets_skips_invalid_entries(app, tmp_path):
     assert result[1]["name"] == "Also Good"
 
 
-def test_load_presets_non_list_root(app, tmp_path):
-    f = tmp_path / "presets.json"
-    f.write_text(json.dumps({"name": "Person"}))
-    result = app.load_presets(str(f))
-    assert len(result) == 1
-    assert result[0]["name"] == "Person"
-
-
-def test_load_presets_all_entries_invalid(app, tmp_path):
-    f = tmp_path / "presets.json"
-    f.write_text(json.dumps([{"name": "Bad"}, {"invalid": True}]))
-    result = app.load_presets(str(f))
-    assert len(result) == 1
-    assert result[0]["name"] == "Person"
-
-
-def test_load_presets_empty_list(app, tmp_path):
-    f = tmp_path / "presets.json"
-    f.write_text("[]")
-    result = app.load_presets(str(f))
-    assert len(result) == 1
-    assert result[0]["name"] == "Person"
-
-
 def test_load_presets_actual_file(app):
     presets_path = str(Path(__file__).resolve().parent.parent / "presets.json")
     result = app.load_presets(presets_path)
@@ -785,18 +689,12 @@ def test_load_presets_actual_file(app):
 # --- _clear_device_cache ---
 
 
-def test_clear_device_cache_cuda(app):
+@pytest.mark.parametrize("device,attr", [("cuda", "cuda"), ("mps", "mps")])
+def test_clear_device_cache(app, device, attr):
     with patch("streamlit_app.torch") as mock_torch:
-        mock_torch.cuda = MagicMock()
-        app._clear_device_cache("cuda")
-        mock_torch.cuda.empty_cache.assert_called_once()
-
-
-def test_clear_device_cache_mps(app):
-    with patch("streamlit_app.torch") as mock_torch:
-        mock_torch.mps = MagicMock()
-        app._clear_device_cache("mps")
-        mock_torch.mps.empty_cache.assert_called_once()
+        setattr(mock_torch, attr, MagicMock())
+        app._clear_device_cache(device)
+        getattr(mock_torch, attr).empty_cache.assert_called_once()
 
 
 def test_clear_device_cache_cpu_is_noop(app):
@@ -1158,16 +1056,6 @@ def test_load_csv_image_invalid_path(app):
     assert result is None
 
 
-def test_load_csv_image_empty_string(app):
-    result = app._load_csv_image("")
-    assert result is None
-
-
-def test_load_csv_image_nan(app):
-    result = app._load_csv_image("nan")
-    assert result is None
-
-
-def test_load_csv_image_none(app):
-    result = app._load_csv_image(None)
-    assert result is None
+@pytest.mark.parametrize("value", ["", "nan", None])
+def test_load_csv_image_returns_none_for_empty(app, value):
+    assert app._load_csv_image(value) is None

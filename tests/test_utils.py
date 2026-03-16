@@ -440,23 +440,13 @@ def test_detect_json_non_dict():
     assert "object" in error.lower()
 
 
-def test_detect_empty_string():
+@pytest.mark.parametrize("input_str", ["", "   "])
+def test_detect_empty_or_whitespace(input_str):
     from utils import detect_and_convert_template
 
-    json_str, fmt, error = detect_and_convert_template("")
+    json_str, fmt, error = detect_and_convert_template(input_str)
     assert json_str is None
     assert fmt is None
-    assert error is not None
-    assert "empty" in error.lower()
-
-
-def test_detect_whitespace_only():
-    from utils import detect_and_convert_template
-
-    json_str, fmt, error = detect_and_convert_template("   ")
-    assert json_str is None
-    assert fmt is None
-    assert error is not None
     assert "empty" in error.lower()
 
 
