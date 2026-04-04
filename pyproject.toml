@@ -7,7 +7,6 @@ dependencies = [
     "mlx-lm>=0.20.0",
     "pandas==2.3.3",
     "pyyaml==6.0.2",
-    "python-dotenv==1.1.0",
     "streamlit==1.54.0",
 ]
 
@@ -17,6 +16,3 @@ dev = [
     "ruff==0.15.0",
     "ty==0.0.16",
 ]
-
-[tool.ruff.lint.per-file-ignores]
-"streamlit_app.py" = ["E402"]
