@@ -32,7 +32,8 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 - **`extract(text, model, tokenizer, template, max_new_tokens)`** — Runs extraction via `mlx_lm.generate()`; enforces `MAX_INPUT_TOKENS` limit (raises `ValueError`); strips `<|end-output|>` marker; returns `(result, was_truncated)`
 - **`_has_config_errors(template_error, template_parsed)`** — Shows first config error via `st.error` and returns `True`, or returns `False` if none
 - **`_get_effective_template(json_str, source_format, template_str)`** — Returns JSON template, converting from YAML/Pydantic if needed and updating session state
-- **`_render_config()`** — Renders inline config controls (preset selector, max tokens slider, template editor, format expander); returns `(template_str, json_str, source_format, template_error, template_parsed, max_new_tokens)`; called once above tabs
+- **`ConfigState`** — `NamedTuple` returned by `_render_config()`: `template_str`, `json_str`, `source_format`, `template_error`, `template_parsed`, `max_new_tokens`
+- **`_render_config()`** — Renders inline config controls (preset selector, max tokens slider, template editor, format expander); returns `ConfigState`; called once above tabs
 - **`_run_single_extraction(text, model, tokenizer, template_str, max_new_tokens)`** — Runs single extraction and displays results; handles truncation warning, JSON parse failure, ValueError, and RuntimeError
 - **`_display_csv_results(df, results, truncated_rows, template_parsed, selected_column, filename)`** — Displays CSV extraction results: truncated warnings, preview dataframe, metrics (Total/Extracted/Failed), download button
 - **Streamlit UI** — Config rendered once above tabs via `_render_config()` (preset selector + max tokens slider side-by-side, then template editor); two tabs: Text, CSV Batch

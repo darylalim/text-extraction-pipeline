@@ -1,5 +1,6 @@
 import json
 import logging
+from typing import NamedTuple
 
 logging.getLogger("transformers.modeling_rope_utils").setLevel(logging.ERROR)
 
@@ -145,12 +146,19 @@ def _get_effective_template(json_str, source_format, template_str):
     return template_str
 
 
-def _render_config():
-    """Render config controls (preset, template, max tokens) and return state.
+class ConfigState(NamedTuple):
+    """State returned by _render_config()."""
 
-    Returns (template_str, json_str, source_format, template_error,
-             template_parsed, max_new_tokens).
-    """
+    template_str: str
+    json_str: str | None
+    source_format: str | None
+    template_error: str | None
+    template_parsed: dict | None
+    max_new_tokens: int
+
+
+def _render_config():
+    """Render config controls (preset, template, max tokens) and return state."""
     presets = load_presets()
     preset_names = [p["name"] for p in presets] + ["Custom"]
 
@@ -170,7 +178,16 @@ def _render_config():
     if selected_preset != st.session_state["prev_preset"]:
         st.session_state["prev_preset"] = selected_preset
         if selected_preset != "Custom":
-            preset = next(p for p in presets if p["name"] == selected_preset)
+            preset = next((p for p in presets if p["name"] == selected_preset), None)
+            if preset is None:
+                return ConfigState(
+                    template_str="",
+                    json_str=None,
+                    source_format=None,
+                    template_error="Preset not found.",
+                    template_parsed=None,
+                    max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
+                )
             st.session_state["template_input"] = json.dumps(
                 preset["template"], indent=2
             )
@@ -216,13 +233,13 @@ def _render_config():
             "The model extracts text verbatim from the input to fill placeholders."
         )
 
-    return (
-        template_str,
-        json_str,
-        source_format,
-        template_error,
-        template_parsed,
-        max_new_tokens,
+    return ConfigState(
+        template_str=template_str,
+        json_str=json_str,
+        source_format=source_format,
+        template_error=template_error,
+        template_parsed=template_parsed,
+        max_new_tokens=max_new_tokens,
     )
 
 
@@ -284,9 +301,14 @@ st.title("NuExtract Pipeline")
 with st.spinner(f"Loading {MODEL_ID}..."):
     model, tokenizer = load_model()
 
-template_str, json_str, source_format, template_error, template_parsed, max_new_tokens = (
-    _render_config()
-)
+(
+    template_str,
+    json_str,
+    source_format,
+    template_error,
+    template_parsed,
+    max_new_tokens,
+) = _render_config()
 
 text_tab, csv_tab = st.tabs(["Text", "CSV Batch"])
 
