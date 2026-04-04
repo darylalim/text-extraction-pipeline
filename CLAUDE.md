@@ -49,7 +49,7 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 
 5 extraction presets (Person, Job Posting, Invoice, Product, Scientific Paper) with templates and sample text. Templates use empty string placeholders (`""` for fields, `[]` for arrays). Loaded by `load_presets()` at app startup.
 
-Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.py` and `tests/test_utils.py`.
+Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.py` (44 tests) and `tests/test_utils.py` (16 tests).
 
 ## Key Details
 
@@ -63,5 +63,6 @@ Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.p
 - No ICL examples (NuExtract-1.5 does not officially support in-context learning)
 - MLX-based inference optimized for Apple Silicon; no GPU device selection needed
 - Supports 6 languages: English, French, Spanish, German, Portuguese, Italian
+- Warning suppression: `transformers.modeling_rope_utils` logger set to ERROR to suppress rope config warning from Phi-3.5 base model
 - Dependencies in `pyproject.toml`; `mlx-lm>=0.20.0` required
 - Sample test data: `tests/data/csv/sample_persons.csv` (30 rows)
