@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Structured extraction pipeline using NuExtract-2.0-4B (`numind/NuExtract-2.0-4B`). Accepts text or images with a user-defined JSON/YAML/Pydantic template and optional ICL examples. Streamlit web UI with four tabs: Text, Image, Image Batch, and CSV Batch.
+Structured extraction pipeline using NuExtract-1.5-MLX-8bit (`mlx-community/numind-NuExtract-1.5-MLX-8bit`). Accepts text with a user-defined JSON/YAML/Pydantic template. Streamlit web UI with two tabs: Text and CSV Batch.
 
 ## Commands
 
@@ -24,57 +24,44 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 
 ### `streamlit_app.py`
 
-- **Constants** — `MODEL_ID`, `MAX_INPUT_TOKENS`, `DEFAULT_TEMPLATE`, `DEFAULT_EXAMPLES`
+- **Constants** — `MODEL_ID`, `MAX_INPUT_TOKENS`, `DEFAULT_TEMPLATE`
 - **`load_presets(path)`** — Loads extraction presets from JSON file; cached via `@st.cache_data`; falls back to Person preset if file missing or invalid
-- **`get_device()`** — Auto-detects compute: MPS → CUDA → CPU
-- **`load_model(device)`** — Loads model and processor in BF16; clears `temperature` from generation config to suppress invalid flag warnings; cached via `@st.cache_resource`
+- **`load_model()`** — Loads model and tokenizer via `mlx_lm.load()`; cached via `@st.cache_resource`
 - **`validate_template(template_str)`** — Validates JSON string is a non-empty dict; returns `(parsed, error)`
-- **`parse_examples(examples_str)`** — Validates JSON array of `{"input", "output"}` objects; input can be a string (text) or dict with `{"type": "image", "image": url}` for image examples; returns `(list, error)`
-- **`extract(..., image=None, max_new_tokens=DEFAULT_MAX_NEW_TOKENS)`** — Thin wrapper around `extract_batch()`; maps `input_content` to `text` (text-only) or `context` (with image); enforces `MAX_INPUT_TOKENS` limit (raises `ValueError`); returns `(result, was_truncated)`
-- **`extract_batch(inputs, ..., chunk_size=4, progress_callback=None)`** — Core batch inference function; accepts list of `{"text", "image", "context"}` dicts; processes in chunks via `_process_chunk`; OOM fallback retries items sequentially with `_clear_device_cache`; token limit violations skip items in batch mode, raise `ValueError` in single-item mode; returns `list[(dict|None, bool)]`
-- **`_build_message(item)`** — Builds chat message from batch input dict (text-only, image-only, or image+context)
-- **`_process_chunk(...)`** — Processes a single chunk as a batched forward pass; delegates to `_sequential_fallback` on OOM or ValueError
-- **`_sequential_fallback(...)`** — Retries each item individually after a batch failure; catches ValueError and OOM RuntimeError per item; clears device cache on OOM
-- **`_run_batch_inference(...)`** — Runs batched model inference: collects images, tokenizes, checks token limits post-processor, generates, trims by `padded_input_len`, decodes, parses JSON per item
-- **`_clear_device_cache(device)`** — Clears GPU memory cache (CUDA/MPS) after OOM errors
-- **`_run_single_extraction(...)`** — Runs single extraction and displays results; handles truncation warning, JSON parse failure, ValueError, and RuntimeError; used by Text and Image tabs
-- **`_display_csv_results(df, results, ...)`** — Displays CSV extraction results: skipped/truncated warnings, preview dataframe, metrics (Total/Extracted/Failed), download button; used by both CSV Batch paths
-- **`_load_csv_image(value)`** — Loads image from URL or file path for CSV batch; handles NaN, empty, and invalid inputs; returns PIL Image or `None`
-- **`_has_config_errors(template_error, examples_error, template_parsed)`** — Shows first config error via `st.error` and returns `True`, or returns `False` if none
-- **`_convert_template_if_needed(json_str, source_format)`** — Converts YAML/Pydantic template to JSON and updates session state on Extract
-- **Streamlit UI** — Sidebar with preset selector, generation slider (64–4096 tokens), template/examples config, and "Generate Template" button; four tabs: Text, Image, Image Batch, CSV Batch; all tabs catch `ValueError` and `RuntimeError` with truncation and OOM warnings
+- **`build_prompt(template_str, text)`** — Builds NuExtract-1.5 prompt with `<|input|>/<|output|>` format
+- **`extract(text, model, tokenizer, template, max_new_tokens)`** — Runs extraction via `mlx_lm.generate()`; enforces `MAX_INPUT_TOKENS` limit (raises `ValueError`); strips `<|end-output|>` marker; returns `(result, was_truncated)`
+- **`_has_config_errors(template_error, template_parsed)`** — Shows first config error via `st.error` and returns `True`, or returns `False` if none
+- **`_get_effective_template(json_str, source_format, template_str)`** — Returns JSON template, converting from YAML/Pydantic if needed and updating session state
+- **`_run_single_extraction(text, model, tokenizer, template_str, max_new_tokens)`** — Runs single extraction and displays results; handles truncation warning, JSON parse failure, ValueError, and RuntimeError
+- **`_display_csv_results(df, results, truncated_rows, template_parsed, selected_column, filename)`** — Displays CSV extraction results: truncated warnings, preview dataframe, metrics (Total/Extracted/Failed), download button
+- **Streamlit UI** — Sidebar with preset selector, generation slider (64–4096 tokens), template config; two tabs: Text, CSV Batch
 - **Text tab** — Single text input with Extract button
-- **Image tab** — Single image upload with optional context text
-- **Image Batch tab** — Multi-image upload with shared/per-image context overrides; configurable batch size (1–8, default 4); results as expandable cards + summary dataframe with metrics and CSV download
-- **CSV Batch tab** — CSV upload with text column selector and optional image column selector; both text-only and image modes use `extract_batch()` with configurable batch size (1–8, default 4)
-- **Warning suppression** — Filters known MPS padding warnings via `warnings.filterwarnings`
+- **CSV Batch tab** — CSV upload with text column selector; sequential extraction with progress bar
 
 ### `utils.py`
 
 - **Constants** — `DEFAULT_MAX_NEW_TOKENS = 2048`
-- **`detect_and_convert_template(template_str)`** — Detects template format (JSON → Pydantic → YAML → natural language) and converts to JSON; returns `(json_str, source_format, error)` where source_format is `"json"`, `"yaml"`, `"pydantic"`, `"pydantic_with_unknown"`, or `None`
-- **`_parse_pydantic_model(text)`** — Regex-based parser for flat Pydantic BaseModel classes; maps `str`/`int`/`float`/`bool`/`datetime`/`list[X]`/`Optional[X]` to NuExtract types; nested models fall back to `"string"`
-- **`_map_pydantic_type(type_str)`** — Maps individual Pydantic type annotations to NuExtract types
-- **`generate_template(description, model, processor, device)`** — Generates a JSON extraction template from a natural language description using NuExtract's native `template=None` mode; uses hardcoded 256 max tokens; returns `(dict, None)` or `(None, error)`
-- **`process_all_vision_info(messages, examples=None)`** — Extracts images from ICL examples and user messages; supports single input (list of dicts) or batch input (list of lists); normalizes examples (None, flat list broadcast, or list-of-lists); raises `ValueError` on batch length mismatch; returns flat list in per-item order or `None`
+- **`detect_and_convert_template(template_str)`** — Detects template format (JSON → Pydantic → YAML) and converts to JSON; returns `(json_str, source_format, error)` where source_format is `"json"`, `"yaml"`, `"pydantic"`, `"pydantic_with_unknown"`, or `None`; returns error for unrecognized formats
+- **`_parse_pydantic_model(text)`** — Regex-based parser for flat Pydantic BaseModel classes; maps all types to empty string placeholders; lists map to `[]`
+- **`_map_pydantic_type(type_str)`** — Maps individual Pydantic type annotations to NuExtract-1.5 placeholders
 
 ### `presets.json`
 
-5 extraction presets (Person, Job Posting, Invoice, Product, Scientific Paper) with templates, ICL examples, and sample text. Loaded by `load_presets()` at app startup.
+5 extraction presets (Person, Job Posting, Invoice, Product, Scientific Paper) with templates and sample text. Templates use empty string placeholders (`""` for fields, `[]` for arrays). Loaded by `load_presets()` at app startup.
 
-Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.py` (103 tests) and `tests/test_utils.py` (35 tests).
+Shared test helpers in `tests/conftest.py`. Tests in `tests/test_streamlit_app.py` and `tests/test_utils.py`.
 
 ## Key Details
 
 - Default 2048 new tokens per extraction (`DEFAULT_MAX_NEW_TOKENS`); configurable via sidebar slider (64–4096)
-- Max 10,000 input tokens (`MAX_INPUT_TOKENS`) to prevent OOM; raises `ValueError` if exceeded
-- `DEFAULT_TEMPLATE` and `DEFAULT_EXAMPLES` provide a person-extraction starting point
-- Template field accepts JSON, YAML, Pydantic models, or natural language; "Generate Template" button converts descriptions to JSON; YAML/Pydantic auto-detected and converted on Extract
-- Detection order: JSON → Pydantic → YAML → natural language (Pydantic before YAML because class syntax is valid YAML)
-- Image examples use URL references (`http://` or `https://` only) and are processed on the Image and Image Batch tabs
-- Image Batch tab supports multi-image upload with shared/per-image context and configurable batch size (1–8)
-- CSV image column supports URLs and local file paths; NaN values silently skipped; invalid paths fall back to text-only with warning
-- Image support requires `qwen-vl-utils` and `torchvision`
-- `HF_TOKEN` env var enables authenticated Hub access (optional; model is public)
+- Max 4,096 input tokens (`MAX_INPUT_TOKENS`); raises `ValueError` if exceeded
+- NuExtract-1.5 prompt format: `<|input|>\n### Template:\n{template}\n### Text:\n{text}\n\n<|output|>\n`
+- Template field accepts JSON, YAML, or Pydantic models; YAML/Pydantic auto-detected and converted on Extract
+- Detection order: JSON → Pydantic → YAML (Pydantic before YAML because class syntax is valid YAML)
+- NuExtract-1.5 templates use empty strings (`""`) as field placeholders and empty arrays (`[]`) for list fields
+- Text-only extraction (no image/vision support)
+- No ICL examples (NuExtract-1.5 does not officially support in-context learning)
+- MLX-based inference optimized for Apple Silicon; no GPU device selection needed
+- Supports 6 languages: English, French, Spanish, German, Portuguese, Italian
+- Dependencies in `pyproject.toml`; `mlx-lm>=0.20.0` required
 - Sample test data: `tests/data/csv/sample_persons.csv` (30 rows)
-- Dependencies in `pyproject.toml` pinned to specific versions
