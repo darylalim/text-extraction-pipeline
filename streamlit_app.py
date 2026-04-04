@@ -1,6 +1,8 @@
 import json
 import logging
 
+logging.getLogger("transformers.modeling_rope_utils").setLevel(logging.ERROR)
+
 import pandas as pd
 import streamlit as st
 from mlx_lm import generate as mlx_generate
