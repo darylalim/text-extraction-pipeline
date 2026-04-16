@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import logging
 import math
@@ -330,6 +332,38 @@ def _extract_multi_chunk(
     if merged is None:
         st.error("Extraction failed — could not merge results.")
     return merged
+
+
+def _result_to_csv(result):
+    """Flatten list-of-dict fields into CSV rows with a 'section' column.
+
+    Returns CSV string or None if no list-of-dict fields present.
+    icd10_code_valid annotations are stripped so CSVs are clean for downstream use.
+    """
+    rows = []
+    for field, value in result.items():
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            for item in value:
+                rows.append(
+                    {
+                        "section": field,
+                        **{k: v for k, v in item.items() if k != "icd10_code_valid"},
+                    }
+                )
+    if not rows:
+        return None
+
+    keys = []
+    for r in rows:
+        for k in r:
+            if k not in keys:
+                keys.append(k)
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=keys)
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue()
 
 
 def _validate_and_display(result):

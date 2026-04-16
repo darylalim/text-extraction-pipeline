@@ -788,3 +788,48 @@ def test_load_presets_actual_file(app):
     for p in result:
         assert isinstance(p["template"], dict) and p["template"]
         assert isinstance(p["sample_text"], str) and p["sample_text"]
+
+
+# --- _result_to_csv ---
+
+
+def test_result_to_csv_flat_scalars_only_returns_none(app):
+    """Result with only scalar fields has no list-of-dict rows to flatten."""
+    result = {"chief_complaint": "chest pain", "hpi": "acute onset"}
+    assert app._result_to_csv(result) is None
+
+
+def test_result_to_csv_single_list_field(app):
+    result = {
+        "medications": [
+            {"name": "lisinopril", "dose": "20mg"},
+            {"name": "atorvastatin", "dose": "40mg"},
+        ]
+    }
+    csv_text = app._result_to_csv(result)
+    assert csv_text is not None
+    lines = csv_text.strip().splitlines()
+    assert lines[0] == "section,name,dose"
+    assert "medications,lisinopril,20mg" in lines[1]
+    assert "medications,atorvastatin,40mg" in lines[2]
+
+
+def test_result_to_csv_multiple_list_fields_merged(app):
+    result = {
+        "medications": [{"name": "aspirin", "dose": "325mg"}],
+        "problems": [{"diagnosis": "HTN", "icd10_code": "I10"}],
+    }
+    csv_text = app._result_to_csv(result)
+    assert csv_text.splitlines()[0] == "section,name,dose,diagnosis,icd10_code"
+
+
+def test_result_to_csv_strips_validation_flag(app):
+    """icd10_code_valid sibling columns should not leak into CSV."""
+    result = {
+        "problems": [
+            {"diagnosis": "HTN", "icd10_code": "I10", "icd10_code_valid": True}
+        ]
+    }
+    csv_text = app._result_to_csv(result)
+    assert "icd10_code_valid" not in csv_text
+    assert "True" not in csv_text
