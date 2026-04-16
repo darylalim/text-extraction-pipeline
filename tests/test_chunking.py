@@ -171,7 +171,12 @@ def test_section_headers_is_frozenset():
 
 
 def test_default_constants():
-    from chunking import DEFAULT_CHUNK_TOKENS, DEFAULT_OVERLAP_TOKENS
+    from chunking import (
+        DEFAULT_CHUNK_TOKENS,
+        DEFAULT_OVERLAP_TOKENS,
+        HEADER_ATTACH_ZONE,
+    )
 
     assert DEFAULT_CHUNK_TOKENS == 3500
     assert DEFAULT_OVERLAP_TOKENS == 200
+    assert HEADER_ATTACH_ZONE == 100

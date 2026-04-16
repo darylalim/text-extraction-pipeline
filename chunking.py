@@ -1,10 +1,11 @@
 import re
+from typing import Any
 
 DEFAULT_CHUNK_TOKENS = 3500
 DEFAULT_OVERLAP_TOKENS = 200
 HEADER_ATTACH_ZONE = 100
 
-SECTION_HEADERS = frozenset(
+SECTION_HEADERS: frozenset[str] = frozenset(
     {
         "HPI",
         "PMH",
@@ -42,16 +43,22 @@ SECTION_HEADERS = frozenset(
 
 _HEADER_PATTERN = re.compile(
     r"^("
-    + "|".join(re.escape(h) for h in sorted(SECTION_HEADERS, key=len, reverse=True))
-    + r")\s*:?",
+    + "|".join(
+        re.escape(h)
+        for h in sorted(SECTION_HEADERS, key=lambda h: len(h), reverse=True)
+    )
+    + r")\s*:?\s*$",
     re.IGNORECASE,
 )
 
 
-def _split_long_line(line, tokenizer, max_tokens):
+def _split_long_line(line: str, tokenizer: Any, max_tokens: int) -> list[str]:
     """Split a single line into sub-lines of at most max_tokens each."""
     # Preserve the trailing newline if present
     trailing = "\n" if line.endswith("\n") else ""
+    # Intermediate sub-lines use "\n" only if the original line had a newline,
+    # otherwise use a space to avoid injecting newlines into non-newline input.
+    intermediate_sep = "\n" if trailing else " "
     stripped = line.rstrip("\n")
     words = stripped.split(" ")
 
@@ -62,7 +69,7 @@ def _split_long_line(line, tokenizer, max_tokens):
     for word in words:
         word_tokens = len(tokenizer.encode(word))
         if current_words and current_tokens + 1 + word_tokens > max_tokens:
-            sub_lines.append(" ".join(current_words) + "\n")
+            sub_lines.append(" ".join(current_words) + intermediate_sep)
             current_words = [word]
             current_tokens = word_tokens
         else:
@@ -78,23 +85,30 @@ def _split_long_line(line, tokenizer, max_tokens):
 
 
 def chunk_text(
-    text, tokenizer, max_tokens=DEFAULT_CHUNK_TOKENS, overlap=DEFAULT_OVERLAP_TOKENS
-):
+    text: str,
+    tokenizer: Any,
+    max_tokens: int = DEFAULT_CHUNK_TOKENS,
+    overlap: int = DEFAULT_OVERLAP_TOKENS,
+) -> list[str]:
     all_tokens = tokenizer.encode(text)
     if len(all_tokens) <= max_tokens:
         return [text]
 
     raw_lines = text.splitlines(keepends=True)
 
-    # Split any line that exceeds max_tokens into word-level sub-lines
-    lines = []
+    # Split any line that exceeds max_tokens into word-level sub-lines.
+    # Cache token counts from the pre-pass to avoid re-tokenizing each line.
+    lines: list[str] = []
+    line_token_counts: list[int] = []
     for line in raw_lines:
-        if len(tokenizer.encode(line)) > max_tokens:
-            lines.extend(_split_long_line(line, tokenizer, max_tokens))
+        count = len(tokenizer.encode(line))
+        if count > max_tokens:
+            sub = _split_long_line(line, tokenizer, max_tokens)
+            lines.extend(sub)
+            line_token_counts.extend(len(tokenizer.encode(s)) for s in sub)
         else:
             lines.append(line)
-
-    line_token_counts = [len(tokenizer.encode(line)) for line in lines]
+            line_token_counts.append(count)
 
     chunks = []
     start = 0
