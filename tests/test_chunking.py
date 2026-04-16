@@ -247,3 +247,19 @@ def test_split_long_line_single_word_kept(tokenizer):
     result = _split_long_line("onlyoneword", tokenizer, max_tokens=1)
     assert len(result) == 1
     assert "onlyoneword" in result[0]
+
+
+# --- Clinical fixture integration ---
+
+
+def test_chunking_on_clinical_sample(tokenizer, sample_3_chunk_text):
+    """Real clinical text from shared fixture splits into multiple chunks."""
+    from chunking import chunk_text
+
+    result = chunk_text(sample_3_chunk_text, tokenizer, max_tokens=15, overlap=2)
+    assert len(result) >= 2
+    # Every word in the original appears somewhere in the combined chunks
+    combined_words = set()
+    for chunk in result:
+        combined_words.update(chunk.split())
+    assert set(sample_3_chunk_text.split()).issubset(combined_words)

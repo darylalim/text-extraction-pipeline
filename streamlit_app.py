@@ -249,6 +249,87 @@ def _render_config():
     )
 
 
+def _extract_single_chunk(text, model, tokenizer, template_str, max_new_tokens):
+    """Run extraction on a single chunk. Returns result dict or None; displays
+    any error/warning via st.* before returning."""
+    try:
+        result, was_truncated = extract(
+            text, model, tokenizer, template_str, max_new_tokens
+        )
+    except ValueError as e:
+        st.error(str(e))
+        return None
+    except RuntimeError as e:
+        st.error(f"Runtime error: {e}")
+        return None
+
+    if was_truncated:
+        st.warning("Output may be truncated — consider increasing max tokens.")
+    if result is None:
+        st.error("Extraction failed — could not parse model output as JSON.")
+        return None
+    return result
+
+
+def _extract_multi_chunk(
+    chunks, model, tokenizer, template_str, template_parsed, max_new_tokens
+):
+    """Extract from each chunk, display progress, merge. Returns merged result
+    dict or None; displays warnings for partial failures and truncation."""
+    results = []
+    truncated_chunks = []
+    progress = st.progress(0, text="Starting...")
+
+    for i, chunk in enumerate(chunks):
+        try:
+            r, was_truncated = extract(
+                chunk, model, tokenizer, template_str, max_new_tokens
+            )
+        except (ValueError, RuntimeError):
+            r, was_truncated = None, False
+        results.append(r)
+        if was_truncated:
+            truncated_chunks.append(i + 1)
+        progress.progress(
+            (i + 1) / len(chunks), text=f"Chunk {i + 1} of {len(chunks)}..."
+        )
+
+    progress.progress(1.0, text="Done.")
+
+    succeeded = sum(1 for r in results if r is not None)
+    if succeeded == 0:
+        st.error("Extraction failed — all chunks returned invalid output.")
+        return None
+    if succeeded < len(chunks):
+        st.warning(
+            f"Extraction succeeded for {succeeded} of {len(chunks)} chunks. Results may be incomplete."
+        )
+    if truncated_chunks:
+        st.warning(
+            f"Output may be truncated in chunk(s) {truncated_chunks} — consider increasing max tokens."
+        )
+
+    merged = merge_results(results, template_parsed)
+    if merged is None:
+        st.error("Extraction failed — could not merge results.")
+    return merged
+
+
+def _validate_and_display(result):
+    """Annotate ICD-10 codes, display warnings, render JSON."""
+    codes = _load_icd10_codes()
+    if codes:
+        result = annotate_icd10(result, codes)
+        invalid = count_invalid_codes(result)
+        if invalid:
+            st.warning(f"{invalid} extracted ICD-10 code(s) not found in CMS 2025 set.")
+    elif not st.session_state.get("_icd10_warning_shown"):
+        st.warning("ICD-10 code list not loaded — validation skipped.")
+        st.session_state["_icd10_warning_shown"] = True
+
+    st.json(result)
+
+
 def _run_extraction(
     text,
     model,
@@ -262,76 +343,21 @@ def _run_extraction(
     max_text_tokens = MAX_INPUT_TOKENS - template_overhead
 
     if text_token_count <= max_text_tokens:
-        try:
-            result, was_truncated = extract(
-                text, model, tokenizer, template_str, max_new_tokens
-            )
-        except ValueError as e:
-            st.error(str(e))
-            return
-        except RuntimeError as e:
-            st.error(f"Runtime error: {e}")
-            return
-
-        if was_truncated:
-            st.warning("Output may be truncated — consider increasing max tokens.")
-        if result is None:
-            st.error("Extraction failed — could not parse model output as JSON.")
-            return
+        result = _extract_single_chunk(
+            text, model, tokenizer, template_str, max_new_tokens
+        )
     else:
         chunks = chunk_text(text, tokenizer, max_tokens=max_text_tokens)
         st.info(
             f"Input is {text_token_count} tokens — splitting into {len(chunks)} chunks."
         )
+        result = _extract_multi_chunk(
+            chunks, model, tokenizer, template_str, template_parsed, max_new_tokens
+        )
 
-        results = []
-        truncated_chunks = []
-        progress = st.progress(0, text="Starting...")
-
-        for i, chunk in enumerate(chunks):
-            try:
-                r, was_truncated = extract(
-                    chunk, model, tokenizer, template_str, max_new_tokens
-                )
-            except (ValueError, RuntimeError):
-                r, was_truncated = None, False
-            results.append(r)
-            if was_truncated:
-                truncated_chunks.append(i + 1)
-            progress.progress(
-                (i + 1) / len(chunks), text=f"Chunk {i + 1} of {len(chunks)}..."
-            )
-
-        progress.progress(1.0, text="Done.")
-
-        succeeded = sum(1 for r in results if r is not None)
-        if succeeded == 0:
-            st.error("Extraction failed — all chunks returned invalid output.")
-            return
-        if succeeded < len(chunks):
-            st.warning(
-                f"Extraction succeeded for {succeeded} of {len(chunks)} chunks. Results may be incomplete."
-            )
-        if truncated_chunks:
-            st.warning(
-                f"Output may be truncated in chunk(s) {truncated_chunks} — consider increasing max tokens."
-            )
-
-        result = merge_results(results, template_parsed)
-        if result is None:
-            st.error("Extraction failed — could not merge results.")
-            return
-
-    codes = _load_icd10_codes()
-    if codes:
-        result = annotate_icd10(result, codes)
-        invalid = count_invalid_codes(result)
-        if invalid:
-            st.warning(f"{invalid} extracted ICD-10 code(s) not found in CMS 2026 set.")
-    else:
-        st.warning("ICD-10 code list not loaded — validation skipped.")
-
-    st.json(result)
+    if result is None:
+        return
+    _validate_and_display(result)
 
 
 # --- Streamlit UI ---

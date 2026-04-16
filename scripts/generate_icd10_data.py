@@ -4,7 +4,7 @@ Download the source from:
 https://www.cms.gov/medicare/coding-billing/icd-10-codes/2025-icd-10-cm
 
 Usage:
-    python scripts/generate_icd10_data.py icd10cm_order_2025.txt data/icd10_cm_2026.json
+    python scripts/generate_icd10_data.py icd10cm_order_2025.txt data/icd10_cm_2025.json
 """
 
 import json

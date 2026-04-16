@@ -1,4 +1,17 @@
+import json
+
+
 def merge_results(results, template):
+    """Merge per-chunk extraction results using template shape.
+
+    - Scalar field (template value is ""): first non-empty value across results wins.
+    - List field (template value is []): union + de-dupe. Items are compared by
+      canonical JSON serialization (with sorted keys), so de-dupe is exact; near-
+      duplicates like "metformin 1000mg" vs "metformin 1000 mg" are not merged.
+    - Nested dict field: recurse using the same rules.
+    - None results are skipped.
+    - All None -> returns None.
+    """
     non_none = [r for r in results if r is not None]
     if not non_none:
         return None
@@ -39,11 +52,15 @@ def _merge_lists(results, key):
         if not isinstance(items, list):
             continue
         for item in items:
-            if isinstance(item, dict):
-                item_key = tuple(sorted(item.items()))
-            else:
-                item_key = item
+            item_key = _hash_key(item)
             if item_key not in seen:
                 seen.add(item_key)
                 all_items.append(item)
     return all_items
+
+
+def _hash_key(item):
+    """Produce a hashable key for de-dupe. Handles dicts with nested values."""
+    if isinstance(item, (dict, list)):
+        return json.dumps(item, sort_keys=True, default=str)
+    return item

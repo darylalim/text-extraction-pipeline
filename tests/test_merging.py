@@ -146,3 +146,50 @@ def test_unpopulated_field_keeps_placeholder():
     template = {"name": "", "age": ""}
     merged = merge_results(results, template)
     assert merged["age"] == ""
+
+
+# --- Nested values in list items ---
+
+
+def test_list_dedupes_items_with_nested_dicts():
+    """Items containing nested dicts must be hashable for de-dupe (uses JSON)."""
+    from merging import merge_results
+
+    item = {"name": "alpha", "metadata": {"notes": "first"}}
+    results = [{"items": [item]}, {"items": [item]}]
+    template = {"items": []}
+    merged = merge_results(results, template)
+    assert len(merged["items"]) == 1
+    assert merged["items"][0] == item
+
+
+def test_list_dedupes_items_with_nested_lists():
+    from merging import merge_results
+
+    item = {"name": "beta", "tags": ["a", "b"]}
+    results = [{"items": [item]}, {"items": [item]}]
+    template = {"items": []}
+    merged = merge_results(results, template)
+    assert len(merged["items"]) == 1
+
+
+# --- Clinical shape via shared fixture ---
+
+
+def test_merge_clinical_chunk_results(sample_per_chunk_results):
+    """Exercises real clinical template shape using shared conftest fixture."""
+    from merging import merge_results
+
+    template = {
+        "chief_complaint": "",
+        "hpi": "",
+        "medications": [{"name": "", "dose": ""}],
+        "assessment": [{"diagnosis": "", "icd10_code": ""}],
+    }
+    merged = merge_results(sample_per_chunk_results, template)
+    assert merged["chief_complaint"] == "chest pain"
+    assert merged["hpi"] == "acute onset chest pain radiating to left arm"
+    med_names = {m["name"] for m in merged["medications"]}
+    assert med_names == {"lisinopril", "atorvastatin"}
+    assert len(merged["assessment"]) == 1
+    assert merged["assessment"][0]["icd10_code"] == "I24.9"

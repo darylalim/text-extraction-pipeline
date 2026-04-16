@@ -15,3 +15,9 @@ dev = [
     "ruff==0.15.0",
     "ty==0.0.16",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "e2e: end-to-end tests that load the real model (slow, opt-in via -m e2e)",
+]
+addopts = "-m 'not e2e'"

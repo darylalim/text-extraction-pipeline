@@ -4,7 +4,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def load_icd10_codes(path="data/icd10_cm_2026.json"):
+def load_icd10_codes(path="data/icd10_cm_2025.json"):
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -30,14 +30,16 @@ def annotate_icd10(result, codes):
 def _annotate_dict(d, codes):
     annotated = {}
     for key, value in d.items():
-        annotated[key] = value
         if key == "icd10_code" and isinstance(value, str):
+            annotated[key] = value
             normalized = value.strip().upper().replace(".", "")
             annotated["icd10_code_valid"] = bool(normalized) and normalized in codes
         elif isinstance(value, dict):
             annotated[key] = _annotate_dict(value, codes)
         elif isinstance(value, list):
             annotated[key] = [annotate_icd10(item, codes) for item in value]
+        else:
+            annotated[key] = value
     return annotated
 
 

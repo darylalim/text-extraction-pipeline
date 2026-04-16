@@ -16,7 +16,7 @@ uv run pytest                              # Run tests
 uv run pytest tests/test_file.py::test_name  # Run a single test
 ```
 
-No CI/CD configured.
+CI via GitHub Actions (`.github/workflows/ci.yml`): runs lint, format check, type check, and `pytest` on every push and PR to `main`. Uses `macos-14` (Apple Silicon) runners for MLX compatibility. E2E tests are excluded from CI — run manually with `uv run pytest -m e2e`.
 
 ## Architecture
 
@@ -65,9 +65,9 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 
 5 clinical extraction presets (SOAP Note, Discharge Summary, H&P, Medication Reconciliation, Problem List) with templates and sample clinical text. Templates use empty string placeholders (`""` for fields, `[]` for arrays). Loaded by `load_presets()` at app startup.
 
-### `data/icd10_cm_2026.json`
+### `data/icd10_cm_2025.json`
 
-Bundled ICD-10-CM code set (dev subset in repo). CMS dotless uppercase format (e.g. `"J18.9"` stored as `"J189"`). Used by `validation.py` for code lookup.
+Bundled ICD-10-CM code set (dev subset in repo). Filename matches the CMS source year. CMS dotless uppercase format (e.g. `"J18.9"` stored as `"J189"`). Used by `validation.py` for code lookup.
 
 ### `scripts/generate_icd10_data.py`
 

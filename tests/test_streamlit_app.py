@@ -394,7 +394,7 @@ def test_run_extraction_icd10_validation(app):
 
 
 def test_run_extraction_icd10_missing_data(app):
-    """Missing ICD-10 data: validation skipped warning shown."""
+    """Missing ICD-10 data: validation skipped warning shown once per session."""
     mock_model = MagicMock()
     mock_tokenizer = MagicMock()
     mock_tokenizer.encode.return_value = list(range(50))
@@ -404,11 +404,43 @@ def test_run_extraction_icd10_missing_data(app):
         patch.object(app, "_load_icd10_codes", return_value=set()),
         patch("streamlit_app.st") as mock_st,
     ):
+        mock_st.session_state = {}
         app._run_extraction(
             "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"name": ""}
         )
     warnings = [call[0][0] for call in mock_st.warning.call_args_list]
     assert any("validation skipped" in w.lower() for w in warnings)
+
+
+def test_run_extraction_icd10_missing_warning_suppressed_after_first(app):
+    """Missing ICD-10 data: warning shown only once, suppressed on subsequent calls."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = list(range(50))
+
+    session_state = {}
+    with (
+        patch.object(app, "extract", return_value=({"name": "Alice"}, False)),
+        patch.object(app, "_load_icd10_codes", return_value=set()),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        mock_st.session_state = session_state
+        # First call — warning should fire and set the flag
+        app._run_extraction(
+            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"name": ""}
+        )
+        # Second call — warning should NOT fire again
+        app._run_extraction(
+            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"name": ""}
+        )
+    # Count of "validation skipped" warnings across both calls should be exactly 1
+    skipped_count = sum(
+        1
+        for call in mock_st.warning.call_args_list
+        if "validation skipped" in call[0][0].lower()
+    )
+    assert skipped_count == 1
+    assert session_state.get("_icd10_warning_shown") is True
 
 
 def test_run_extraction_valueerror_single_chunk(app):
