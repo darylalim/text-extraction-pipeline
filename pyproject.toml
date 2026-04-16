@@ -5,7 +5,6 @@ description = "Structured extraction pipeline using NuExtract-1.5-MLX with Strea
 requires-python = ">=3.12"
 dependencies = [
     "mlx-lm>=0.20.0",
-    "pandas==2.3.3",
     "pyyaml==6.0.2",
     "streamlit==1.54.0",
 ]

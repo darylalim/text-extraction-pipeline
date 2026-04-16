@@ -15,14 +15,10 @@ def app():
     """Import streamlit_app with streamlit UI and model loading mocked."""
     import streamlit as st
 
-    tab_mocks = [MagicMock(), MagicMock()]
-
     with (
         patch.object(st, "title"),
         patch.object(st, "text_area", return_value=""),
         patch.object(st, "button", return_value=False),
-        patch.object(st, "file_uploader", return_value=None),
-        patch.object(st, "tabs", return_value=tab_mocks),
         patch.object(st, "spinner"),
         patch.object(st, "info"),
         patch.object(st, "error"),
@@ -511,57 +507,3 @@ def test_load_presets_actual_file(app):
     for p in result:
         assert isinstance(p["template"], dict) and p["template"]
         assert isinstance(p["sample_text"], str) and p["sample_text"]
-
-
-# --- _display_csv_results ---
-
-
-def test_display_csv_results_normal(app):
-    import pandas as pd
-
-    df = pd.DataFrame({"text": ["a", "b"]})
-    results = [{"company": "Acme"}, {"company": "Beta"}]
-
-    with patch("streamlit_app.st") as mock_st:
-        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
-        mock_st.columns.return_value = [col1, col2, col3]
-        app._display_csv_results(df, results, [], {"company": ""}, "text", "test.csv")
-    mock_st.write.assert_called_once_with("Preview")
-    mock_st.dataframe.assert_called_once()
-    mock_st.download_button.assert_called_once()
-    assert mock_st.download_button.call_args[1]["file_name"] == "test_extract.csv"
-    mock_st.warning.assert_not_called()
-    col1.metric.assert_called_once_with("Total Rows", 2)
-    col2.metric.assert_called_once_with("Extracted", 2)
-    col3.metric.assert_called_once_with("Failed", 0)
-
-
-def test_display_csv_results_truncated_rows(app):
-    import pandas as pd
-
-    df = pd.DataFrame({"text": ["a"]})
-    results = [{"company": "Acme"}]
-
-    with patch("streamlit_app.st") as mock_st:
-        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
-        mock_st.columns.return_value = [col1, col2, col3]
-        app._display_csv_results(
-            df, results, [2, 4], {"company": ""}, "text", "test.csv"
-        )
-    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
-    assert any("truncated" in w.lower() for w in warnings)
-
-
-def test_display_csv_results_all_none(app):
-    import pandas as pd
-
-    df = pd.DataFrame({"text": ["a", "b", "c"]})
-    results = [None, None, None]
-
-    with patch("streamlit_app.st") as mock_st:
-        col1, col2, col3 = MagicMock(), MagicMock(), MagicMock()
-        mock_st.columns.return_value = [col1, col2, col3]
-        app._display_csv_results(df, results, [], {"company": ""}, "text", "test.csv")
-    col1.metric.assert_called_once_with("Total Rows", 3)
-    col2.metric.assert_called_once_with("Extracted", 0)
-    col3.metric.assert_called_once_with("Failed", 3)

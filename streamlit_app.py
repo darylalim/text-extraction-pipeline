@@ -4,7 +4,6 @@ from typing import NamedTuple
 
 logging.getLogger("transformers.modeling_rope_utils").setLevel(logging.ERROR)
 
-import pandas as pd
 import streamlit as st
 from mlx_lm import generate as mlx_generate
 from mlx_lm import load as mlx_load
@@ -262,37 +261,6 @@ def _run_single_extraction(
         st.error(f"Runtime error: {e}")
 
 
-def _display_csv_results(
-    df, results, truncated_rows, template_parsed, selected_column, filename
-):
-    """Display CSV extraction results with preview, metrics, and download."""
-    if truncated_rows:
-        st.warning(f"Rows possibly truncated: {truncated_rows}")
-
-    fields = list(template_parsed.keys())
-    for field in fields:
-        df[field] = [r.get(field, "") if r is not None else "" for r in results]
-
-    st.write("Preview")
-    st.dataframe(df[[selected_column] + fields].head(), width="stretch")
-
-    total = len(df)
-    failed = sum(1 for r in results if r is None)
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Rows", total)
-    col2.metric("Extracted", total - failed)
-    col3.metric("Failed", failed)
-
-    base_name = filename.rsplit(".", 1)[0]
-    st.download_button(
-        label="Download",
-        data=df.to_csv(index=False),
-        file_name=f"{base_name}_extract.csv",
-        mime="text/csv",
-    )
-
-
 # --- Streamlit UI ---
 
 st.title("NuExtract Pipeline")
@@ -309,87 +277,18 @@ with st.spinner(f"Loading {MODEL_ID}..."):
     max_new_tokens,
 ) = _render_config()
 
-text_tab, csv_tab = st.tabs(["Text", "CSV Batch"])
-
-with text_tab:
-    input_text = st.text_area(
-        "Enter text to extract from", height=150, key="text_input"
-    )
-    if st.button("Extract", type="primary", key="text_extract"):
-        if not _has_config_errors(template_error, template_parsed):
-            if not input_text.strip():
-                st.warning("Enter some text.")
-            else:
-                effective = _get_effective_template(
-                    json_str, source_format, template_str
+input_text = st.text_area("Enter text to extract from", height=150, key="text_input")
+if st.button("Extract", type="primary", key="text_extract"):
+    if not _has_config_errors(template_error, template_parsed):
+        if not input_text.strip():
+            st.warning("Enter some text.")
+        else:
+            effective = _get_effective_template(json_str, source_format, template_str)
+            with st.spinner("Extracting..."):
+                _run_single_extraction(
+                    input_text,
+                    model,
+                    tokenizer,
+                    effective,
+                    max_new_tokens=max_new_tokens,
                 )
-                with st.spinner("Extracting..."):
-                    _run_single_extraction(
-                        input_text,
-                        model,
-                        tokenizer,
-                        effective,
-                        max_new_tokens=max_new_tokens,
-                    )
-
-with csv_tab:
-    uploaded_file = st.file_uploader(
-        "Upload CSV file",
-        type=["csv"],
-        key="csv_upload",
-        help="Upload a CSV file with text to extract from",
-    )
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            st.success(f"File uploaded. ({len(df)} rows)")
-
-            selected_column = st.selectbox(
-                "Select text column", options=df.columns.tolist()
-            )
-
-            if st.button("Extract", type="primary", key="csv_extract"):
-                if not _has_config_errors(template_error, template_parsed):
-                    effective = _get_effective_template(
-                        json_str, source_format, template_str
-                    )
-
-                    progress_bar = st.progress(0, text="Starting...")
-                    results = []
-                    truncated_rows = []
-                    texts = df[selected_column].astype(str).tolist()
-
-                    with st.spinner("Extracting..."):
-                        for i, text in enumerate(texts):
-                            try:
-                                result, was_truncated = extract(
-                                    text,
-                                    model,
-                                    tokenizer,
-                                    effective,
-                                    max_new_tokens=max_new_tokens,
-                                )
-                            except (ValueError, RuntimeError):
-                                result, was_truncated = None, False
-                            results.append(result)
-                            if was_truncated:
-                                truncated_rows.append(i + 1)
-                            progress_bar.progress(
-                                (i + 1) / len(texts),
-                                text=f"Processing {i + 1} of {len(texts)} rows...",
-                            )
-
-                    progress_bar.progress(1.0, text="Done.")
-                    _display_csv_results(
-                        df,
-                        results,
-                        truncated_rows,
-                        template_parsed,
-                        selected_column,
-                        uploaded_file.name,
-                    )
-
-        except (pd.errors.ParserError, KeyError, UnicodeDecodeError) as e:
-            st.error(f"Error: {e}")
-    else:
-        st.info("Upload a CSV file.")
