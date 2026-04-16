@@ -482,11 +482,10 @@ wheels = [
 
 [[package]]
 name = "nuextract-pipeline"
-version = "0.7.0"
+version = "0.8.0"
 source = { virtual = "." }
 dependencies = [
     { name = "mlx-lm" },
-    { name = "pandas" },
     { name = "pyyaml" },
     { name = "streamlit" },
 ]
@@ -501,7 +500,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "mlx-lm", specifier = ">=0.20.0" },
-    { name = "pandas", specifier = "==2.3.3" },
     { name = "pyyaml", specifier = "==6.0.2" },
     { name = "streamlit", specifier = "==1.54.0" },
 ]

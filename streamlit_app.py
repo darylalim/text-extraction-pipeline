@@ -4,12 +4,14 @@ from typing import NamedTuple
 
 logging.getLogger("transformers.modeling_rope_utils").setLevel(logging.ERROR)
 
-import pandas as pd
-import streamlit as st
-from mlx_lm import generate as mlx_generate
-from mlx_lm import load as mlx_load
+import streamlit as st  # noqa: E402
+from mlx_lm import generate as mlx_generate  # noqa: E402
+from mlx_lm import load as mlx_load  # noqa: E402
 
-from utils import DEFAULT_MAX_NEW_TOKENS, detect_and_convert_template
+from utils import DEFAULT_MAX_NEW_TOKENS, detect_and_convert_template  # noqa: E402
+from chunking import chunk_text  # noqa: E402
+from merging import merge_results  # noqa: E402
+from validation import annotate_icd10, count_invalid_codes, load_icd10_codes  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +19,13 @@ MODEL_ID = "mlx-community/numind-NuExtract-1.5-MLX-8bit"
 MAX_INPUT_TOKENS = 4_096
 DEFAULT_TEMPLATE = json.dumps(
     {
-        "first_name": "",
-        "last_name": "",
-        "description": "",
-        "age": "",
-        "gpa": "",
-        "birth_date": "",
-        "nationality": "",
-        "languages_spoken": [],
+        "chief_complaint": "",
+        "hpi": "",
+        "review_of_systems": "",
+        "vitals": {"bp": "", "hr": "", "temp": "", "rr": "", "spo2": ""},
+        "exam_findings": "",
+        "assessment": [{"diagnosis": "", "icd10_code": ""}],
+        "plan": [],
     },
     indent=2,
 )
@@ -39,7 +40,7 @@ def load_presets(path="presets.json"):
     """
     fallback = [
         {
-            "name": "Person",
+            "name": "SOAP Note",
             "template": json.loads(DEFAULT_TEMPLATE),
             "sample_text": "",
         }
@@ -75,6 +76,11 @@ def load_model():
     """Load NuExtract-1.5-MLX model and tokenizer."""
     model, tokenizer = mlx_load(MODEL_ID)
     return model, tokenizer
+
+
+@st.cache_data
+def _load_icd10_codes():
+    return load_icd10_codes()
 
 
 def validate_template(template_str):
@@ -243,55 +249,89 @@ def _render_config():
     )
 
 
-def _run_single_extraction(
-    text, model, tokenizer, template_str, max_new_tokens=DEFAULT_MAX_NEW_TOKENS
+def _run_extraction(
+    text,
+    model,
+    tokenizer,
+    template_str,
+    template_parsed,
+    max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
 ):
-    """Run single extraction and display results with error handling."""
-    try:
-        result, was_truncated = extract(
-            text, model, tokenizer, template_str, max_new_tokens
-        )
+    template_overhead = len(tokenizer.encode(build_prompt(template_str, "")))
+    text_token_count = len(tokenizer.encode(text))
+    max_text_tokens = MAX_INPUT_TOKENS - template_overhead
+
+    if text_token_count <= max_text_tokens:
+        try:
+            result, was_truncated = extract(
+                text, model, tokenizer, template_str, max_new_tokens
+            )
+        except ValueError as e:
+            st.error(str(e))
+            return
+        except RuntimeError as e:
+            st.error(f"Runtime error: {e}")
+            return
+
         if was_truncated:
             st.warning("Output may be truncated — consider increasing max tokens.")
-        if result is not None:
-            st.json(result)
-        else:
+        if result is None:
             st.error("Extraction failed — could not parse model output as JSON.")
-    except ValueError as e:
-        st.error(str(e))
-    except RuntimeError as e:
-        st.error(f"Runtime error: {e}")
+            return
+    else:
+        chunks = chunk_text(text, tokenizer, max_tokens=max_text_tokens)
+        st.info(
+            f"Input is {text_token_count} tokens — splitting into {len(chunks)} chunks."
+        )
 
+        results = []
+        truncated_chunks = []
+        progress = st.progress(0, text="Starting...")
 
-def _display_csv_results(
-    df, results, truncated_rows, template_parsed, selected_column, filename
-):
-    """Display CSV extraction results with preview, metrics, and download."""
-    if truncated_rows:
-        st.warning(f"Rows possibly truncated: {truncated_rows}")
+        for i, chunk in enumerate(chunks):
+            try:
+                r, was_truncated = extract(
+                    chunk, model, tokenizer, template_str, max_new_tokens
+                )
+            except (ValueError, RuntimeError):
+                r, was_truncated = None, False
+            results.append(r)
+            if was_truncated:
+                truncated_chunks.append(i + 1)
+            progress.progress(
+                (i + 1) / len(chunks), text=f"Chunk {i + 1} of {len(chunks)}..."
+            )
 
-    fields = list(template_parsed.keys())
-    for field in fields:
-        df[field] = [r.get(field, "") if r is not None else "" for r in results]
+        progress.progress(1.0, text="Done.")
 
-    st.write("Preview")
-    st.dataframe(df[[selected_column] + fields].head(), width="stretch")
+        succeeded = sum(1 for r in results if r is not None)
+        if succeeded == 0:
+            st.error("Extraction failed — all chunks returned invalid output.")
+            return
+        if succeeded < len(chunks):
+            st.warning(
+                f"Extraction succeeded for {succeeded} of {len(chunks)} chunks. Results may be incomplete."
+            )
+        if truncated_chunks:
+            st.warning(
+                f"Output may be truncated in chunk(s) {truncated_chunks} — consider increasing max tokens."
+            )
 
-    total = len(df)
-    failed = sum(1 for r in results if r is None)
+        result = merge_results(results, template_parsed)
+        if result is None:
+            st.error("Extraction failed — could not merge results.")
+            return
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Rows", total)
-    col2.metric("Extracted", total - failed)
-    col3.metric("Failed", failed)
+    codes = _load_icd10_codes()
+    if codes:
+        result = annotate_icd10(result, codes)
+        invalid = count_invalid_codes(result)
+        if invalid:
+            st.warning(f"{invalid} extracted ICD-10 code(s) not found in CMS 2026 set.")
+    else:
+        st.warning("ICD-10 code list not loaded — validation skipped.")
 
-    base_name = filename.rsplit(".", 1)[0]
-    st.download_button(
-        label="Download",
-        data=df.to_csv(index=False),
-        file_name=f"{base_name}_extract.csv",
-        mime="text/csv",
-    )
+    st.json(result)
 
 
 # --- Streamlit UI ---
@@ -310,87 +350,19 @@ with st.spinner(f"Loading {MODEL_ID}..."):
     max_new_tokens,
 ) = _render_config()
 
-text_tab, csv_tab = st.tabs(["Text", "CSV Batch"])
-
-with text_tab:
-    input_text = st.text_area(
-        "Enter text to extract from", height=150, key="text_input"
-    )
-    if st.button("Extract", type="primary", key="text_extract"):
-        if not _has_config_errors(template_error, template_parsed):
-            if not input_text.strip():
-                st.warning("Enter some text.")
-            else:
-                effective = _get_effective_template(
-                    json_str, source_format, template_str
+input_text = st.text_area("Enter text to extract from", height=150, key="text_input")
+if st.button("Extract", type="primary", key="text_extract"):
+    if not _has_config_errors(template_error, template_parsed):
+        if not input_text.strip():
+            st.warning("Enter some text.")
+        else:
+            effective = _get_effective_template(json_str, source_format, template_str)
+            with st.spinner("Extracting..."):
+                _run_extraction(
+                    input_text,
+                    model,
+                    tokenizer,
+                    effective,
+                    template_parsed,
+                    max_new_tokens=max_new_tokens,
                 )
-                with st.spinner("Extracting..."):
-                    _run_single_extraction(
-                        input_text,
-                        model,
-                        tokenizer,
-                        effective,
-                        max_new_tokens=max_new_tokens,
-                    )
-
-with csv_tab:
-    uploaded_file = st.file_uploader(
-        "Upload CSV file",
-        type=["csv"],
-        key="csv_upload",
-        help="Upload a CSV file with text to extract from",
-    )
-    if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            st.success(f"File uploaded. ({len(df)} rows)")
-
-            selected_column = st.selectbox(
-                "Select text column", options=df.columns.tolist()
-            )
-
-            if st.button("Extract", type="primary", key="csv_extract"):
-                if not _has_config_errors(template_error, template_parsed):
-                    effective = _get_effective_template(
-                        json_str, source_format, template_str
-                    )
-
-                    progress_bar = st.progress(0, text="Starting...")
-                    results = []
-                    truncated_rows = []
-                    texts = df[selected_column].astype(str).tolist()
-
-                    with st.spinner("Extracting..."):
-                        for i, text in enumerate(texts):
-                            try:
-                                result, was_truncated = extract(
-                                    text,
-                                    model,
-                                    tokenizer,
-                                    effective,
-                                    max_new_tokens=max_new_tokens,
-                                )
-                            except (ValueError, RuntimeError):
-                                result, was_truncated = None, False
-                            results.append(result)
-                            if was_truncated:
-                                truncated_rows.append(i + 1)
-                            progress_bar.progress(
-                                (i + 1) / len(texts),
-                                text=f"Processing {i + 1} of {len(texts)} rows...",
-                            )
-
-                    progress_bar.progress(1.0, text="Done.")
-                    _display_csv_results(
-                        df,
-                        results,
-                        truncated_rows,
-                        template_parsed,
-                        selected_column,
-                        uploaded_file.name,
-                    )
-
-        except (pd.errors.ParserError, KeyError, UnicodeDecodeError) as e:
-            st.error(f"Error: {e}")
-    else:
-        st.info("Upload a CSV file.")
