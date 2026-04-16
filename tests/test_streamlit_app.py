@@ -243,58 +243,223 @@ def test_render_config_preset_change_updates_session(app):
         assert mock_st.session_state["text_input"] == "Maria"
 
 
-# --- _run_single_extraction ---
+# --- _run_extraction ---
 
 
-def test_run_single_extraction_success(app):
+def test_run_extraction_short_input(app):
+    """Short input takes single-chunk path, displays result."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = list(range(50))
+
     with (
-        patch.object(app, "extract", return_value=({"company": "Acme"}, False)),
+        patch.object(app, "extract", return_value=({"name": "Alice"}, False)),
+        patch.object(app, "_load_icd10_codes", return_value=set()),
         patch("streamlit_app.st") as mock_st,
     ):
-        app._run_single_extraction("text", MagicMock(), MagicMock(), TEST_TEMPLATE)
-    mock_st.json.assert_called_once_with({"company": "Acme"})
-    mock_st.warning.assert_not_called()
-    mock_st.error.assert_not_called()
+        app._run_extraction(
+            "short text",
+            mock_model,
+            mock_tokenizer,
+            TEST_TEMPLATE,
+            {"company": "", "revenue": ""},
+        )
+    mock_st.json.assert_called_once()
+    mock_st.info.assert_not_called()
 
 
-def test_run_single_extraction_truncated(app):
+def test_run_extraction_long_input_chunks_and_merges(app):
+    """Long input triggers chunking, merging, and displays merged result."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    # First encode call (build_prompt overhead): 20 tokens
+    # Second encode call (text tokens): 5000 tokens (exceeds 4096 - 20)
+    mock_tokenizer.encode.side_effect = [list(range(20)), list(range(5000))]
+
     with (
-        patch.object(app, "extract", return_value=({"company": "Acme"}, True)),
+        patch(
+            "streamlit_app.chunk_text", return_value=["chunk1", "chunk2"]
+        ) as mock_chunk,
+        patch.object(
+            app,
+            "extract",
+            side_effect=[
+                ({"company": "Acme"}, False),
+                ({"revenue": "1M"}, False),
+            ],
+        ),
+        patch(
+            "streamlit_app.merge_results",
+            return_value={"company": "Acme", "revenue": "1M"},
+        ) as mock_merge,
+        patch.object(app, "_load_icd10_codes", return_value=set()),
         patch("streamlit_app.st") as mock_st,
     ):
-        app._run_single_extraction("text", MagicMock(), MagicMock(), TEST_TEMPLATE)
-    mock_st.json.assert_called_once_with({"company": "Acme"})
-    mock_st.warning.assert_called_once()
-    assert "truncated" in mock_st.warning.call_args[0][0].lower()
+        mock_st.progress.return_value = MagicMock()
+        template_parsed = {"company": "", "revenue": ""}
+        app._run_extraction(
+            "very long text...",
+            mock_model,
+            mock_tokenizer,
+            TEST_TEMPLATE,
+            template_parsed,
+        )
+    mock_chunk.assert_called_once()
+    mock_merge.assert_called_once()
+    mock_st.json.assert_called_once()
 
 
-def test_run_single_extraction_parse_failure(app):
+def test_run_extraction_partial_chunk_failure(app):
+    """Some chunks fail: warning shown, partial result displayed."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.side_effect = [list(range(20)), list(range(5000))]
+
     with (
+        patch("streamlit_app.chunk_text", return_value=["c1", "c2", "c3"]),
+        patch.object(
+            app,
+            "extract",
+            side_effect=[
+                ({"company": "Acme"}, False),
+                (None, False),
+                ({"revenue": "1M"}, False),
+            ],
+        ),
+        patch(
+            "streamlit_app.merge_results",
+            return_value={"company": "Acme", "revenue": "1M"},
+        ),
+        patch.object(app, "_load_icd10_codes", return_value=set()),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        mock_st.progress.return_value = MagicMock()
+        app._run_extraction(
+            "long text",
+            mock_model,
+            mock_tokenizer,
+            TEST_TEMPLATE,
+            {"company": "", "revenue": ""},
+        )
+    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
+    assert any("2 of 3" in w for w in warnings)
+
+
+def test_run_extraction_all_chunks_fail(app):
+    """All chunks fail: error shown, no JSON displayed."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.side_effect = [list(range(20)), list(range(5000))]
+
+    with (
+        patch("streamlit_app.chunk_text", return_value=["c1", "c2"]),
         patch.object(app, "extract", return_value=(None, False)),
+        patch.object(app, "_load_icd10_codes", return_value=set()),
         patch("streamlit_app.st") as mock_st,
     ):
-        app._run_single_extraction("text", MagicMock(), MagicMock(), TEST_TEMPLATE)
-    mock_st.error.assert_called_once()
-    assert "json" in mock_st.error.call_args[0][0].lower()
+        mock_st.progress.return_value = MagicMock()
+        app._run_extraction(
+            "long text",
+            mock_model,
+            mock_tokenizer,
+            TEST_TEMPLATE,
+            {"company": "", "revenue": ""},
+        )
+    mock_st.error.assert_called()
+    mock_st.json.assert_not_called()
 
 
-def test_run_single_extraction_valueerror(app):
+def test_run_extraction_icd10_validation(app):
+    """ICD-10 codes in result get validated and warning shown for invalid."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = list(range(50))
+
+    result_with_code = {"diagnosis": "HTN", "icd10_code": "FAKE.99"}
+
+    with (
+        patch.object(app, "extract", return_value=(result_with_code, False)),
+        patch.object(app, "_load_icd10_codes", return_value={"I10", "E119"}),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_extraction(
+            "text",
+            mock_model,
+            mock_tokenizer,
+            TEST_TEMPLATE,
+            {"diagnosis": "", "icd10_code": ""},
+        )
+    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
+    assert any("ICD-10" in w for w in warnings)
+
+
+def test_run_extraction_icd10_missing_data(app):
+    """Missing ICD-10 data: validation skipped warning shown."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = list(range(50))
+
+    with (
+        patch.object(app, "extract", return_value=({"name": "Alice"}, False)),
+        patch.object(app, "_load_icd10_codes", return_value=set()),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_extraction(
+            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"name": ""}
+        )
+    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
+    assert any("validation skipped" in w.lower() for w in warnings)
+
+
+def test_run_extraction_valueerror_single_chunk(app):
+    """ValueError in single-chunk path displays error."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = list(range(50))
+
     with (
         patch.object(app, "extract", side_effect=ValueError("Input too long")),
         patch("streamlit_app.st") as mock_st,
     ):
-        app._run_single_extraction("text", MagicMock(), MagicMock(), TEST_TEMPLATE)
+        app._run_extraction(
+            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"company": ""}
+        )
     mock_st.error.assert_called_once_with("Input too long")
 
 
-def test_run_single_extraction_runtimeerror(app):
+def test_run_extraction_truncated_chunks_warning(app):
+    """Truncated chunks show warning with chunk numbers."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.side_effect = [list(range(20)), list(range(5000))]
+
     with (
-        patch.object(app, "extract", side_effect=RuntimeError("memory issue")),
+        patch("streamlit_app.chunk_text", return_value=["c1", "c2"]),
+        patch.object(
+            app,
+            "extract",
+            side_effect=[
+                ({"company": "Acme"}, True),
+                ({"revenue": "1M"}, False),
+            ],
+        ),
+        patch(
+            "streamlit_app.merge_results",
+            return_value={"company": "Acme", "revenue": "1M"},
+        ),
+        patch.object(app, "_load_icd10_codes", return_value=set()),
         patch("streamlit_app.st") as mock_st,
     ):
-        app._run_single_extraction("text", MagicMock(), MagicMock(), TEST_TEMPLATE)
-    mock_st.error.assert_called_once()
-    assert "runtime error" in mock_st.error.call_args[0][0].lower()
+        mock_st.progress.return_value = MagicMock()
+        app._run_extraction(
+            "long text",
+            mock_model,
+            mock_tokenizer,
+            TEST_TEMPLATE,
+            {"company": "", "revenue": ""},
+        )
+    warnings = [call[0][0] for call in mock_st.warning.call_args_list]
+    assert any("truncated" in w.lower() for w in warnings)
 
 
 # --- extract ---

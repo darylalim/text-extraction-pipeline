@@ -9,6 +9,9 @@ from mlx_lm import generate as mlx_generate
 from mlx_lm import load as mlx_load
 
 from utils import DEFAULT_MAX_NEW_TOKENS, detect_and_convert_template
+from chunking import chunk_text
+from merging import merge_results
+from validation import annotate_icd10, count_invalid_codes, load_icd10_codes
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,11 @@ def load_model():
     """Load NuExtract-1.5-MLX model and tokenizer."""
     model, tokenizer = mlx_load(MODEL_ID)
     return model, tokenizer
+
+
+@st.cache_data
+def _load_icd10_codes():
+    return load_icd10_codes()
 
 
 def validate_template(template_str):
@@ -241,24 +249,89 @@ def _render_config():
     )
 
 
-def _run_single_extraction(
-    text, model, tokenizer, template_str, max_new_tokens=DEFAULT_MAX_NEW_TOKENS
+def _run_extraction(
+    text,
+    model,
+    tokenizer,
+    template_str,
+    template_parsed,
+    max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
 ):
-    """Run single extraction and display results with error handling."""
-    try:
-        result, was_truncated = extract(
-            text, model, tokenizer, template_str, max_new_tokens
-        )
+    template_overhead = len(tokenizer.encode(build_prompt(template_str, "")))
+    text_token_count = len(tokenizer.encode(text))
+    max_text_tokens = MAX_INPUT_TOKENS - template_overhead
+
+    if text_token_count <= max_text_tokens:
+        try:
+            result, was_truncated = extract(
+                text, model, tokenizer, template_str, max_new_tokens
+            )
+        except ValueError as e:
+            st.error(str(e))
+            return
+        except RuntimeError as e:
+            st.error(f"Runtime error: {e}")
+            return
+
         if was_truncated:
             st.warning("Output may be truncated — consider increasing max tokens.")
-        if result is not None:
-            st.json(result)
-        else:
+        if result is None:
             st.error("Extraction failed — could not parse model output as JSON.")
-    except ValueError as e:
-        st.error(str(e))
-    except RuntimeError as e:
-        st.error(f"Runtime error: {e}")
+            return
+    else:
+        chunks = chunk_text(text, tokenizer, max_tokens=max_text_tokens)
+        st.info(
+            f"Input is {text_token_count} tokens — splitting into {len(chunks)} chunks."
+        )
+
+        results = []
+        truncated_chunks = []
+        progress = st.progress(0, text="Starting...")
+
+        for i, chunk in enumerate(chunks):
+            try:
+                r, was_truncated = extract(
+                    chunk, model, tokenizer, template_str, max_new_tokens
+                )
+            except (ValueError, RuntimeError):
+                r, was_truncated = None, False
+            results.append(r)
+            if was_truncated:
+                truncated_chunks.append(i + 1)
+            progress.progress(
+                (i + 1) / len(chunks), text=f"Chunk {i + 1} of {len(chunks)}..."
+            )
+
+        progress.progress(1.0, text="Done.")
+
+        succeeded = sum(1 for r in results if r is not None)
+        if succeeded == 0:
+            st.error("Extraction failed — all chunks returned invalid output.")
+            return
+        if succeeded < len(chunks):
+            st.warning(
+                f"Extraction succeeded for {succeeded} of {len(chunks)} chunks. Results may be incomplete."
+            )
+        if truncated_chunks:
+            st.warning(
+                f"Output may be truncated in chunk(s) {truncated_chunks} — consider increasing max tokens."
+            )
+
+        result = merge_results(results, template_parsed)
+        if result is None:
+            st.error("Extraction failed — could not merge results.")
+            return
+
+    codes = _load_icd10_codes()
+    if codes:
+        result = annotate_icd10(result, codes)
+        invalid = count_invalid_codes(result)
+        if invalid:
+            st.warning(f"{invalid} extracted ICD-10 code(s) not found in CMS 2026 set.")
+    else:
+        st.warning("ICD-10 code list not loaded — validation skipped.")
+
+    st.json(result)
 
 
 # --- Streamlit UI ---
@@ -285,10 +358,11 @@ if st.button("Extract", type="primary", key="text_extract"):
         else:
             effective = _get_effective_template(json_str, source_format, template_str)
             with st.spinner("Extracting..."):
-                _run_single_extraction(
+                _run_extraction(
                     input_text,
                     model,
                     tokenizer,
                     effective,
+                    template_parsed,
                     max_new_tokens=max_new_tokens,
                 )
