@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 from typing import NamedTuple
 
 logging.getLogger("transformers.modeling_rope_utils").setLevel(logging.ERROR)
@@ -9,7 +10,7 @@ from mlx_lm import generate as mlx_generate  # noqa: E402
 from mlx_lm import load as mlx_load  # noqa: E402
 
 from utils import DEFAULT_MAX_NEW_TOKENS, detect_and_convert_template  # noqa: E402
-from chunking import chunk_text  # noqa: E402
+from chunking import DEFAULT_CHUNK_TOKENS, DEFAULT_OVERLAP_TOKENS, chunk_text  # noqa: E402
 from merging import merge_results  # noqa: E402
 from validation import annotate_icd10, count_invalid_codes, load_icd10_codes  # noqa: E402
 
@@ -150,6 +151,22 @@ def _get_effective_template(json_str, source_format, template_str):
         st.session_state["template_input"] = json_str
         return json_str
     return template_str
+
+
+def _describe_token_budget(n_tokens, budget):
+    """Return (color, message) describing whether input fits in one chunk.
+
+    color is 'green' when n_tokens <= budget, 'orange' otherwise.
+    """
+    if n_tokens <= budget:
+        return "green", f"✓ {n_tokens:,} / {budget:,} tokens — single chunk"
+    step = DEFAULT_CHUNK_TOKENS - DEFAULT_OVERLAP_TOKENS
+    n_chunks = math.ceil(n_tokens / step)
+    return (
+        "orange",
+        f"⚠ {n_tokens:,} tokens exceeds {budget:,} budget — "
+        f"will split into ~{n_chunks} chunks",
+    )
 
 
 class ConfigState(NamedTuple):

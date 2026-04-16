@@ -139,6 +139,35 @@ def test_get_effective_template_returns_original(app, fmt):
     assert result == "original"
 
 
+# --- _describe_token_budget ---
+
+
+def test_describe_token_budget_under_limit(app):
+    color, msg = app._describe_token_budget(n_tokens=100, budget=4000)
+    assert color == "green"
+    assert "100" in msg and "4,000" in msg
+    assert "single chunk" in msg.lower()
+
+
+def test_describe_token_budget_at_limit(app):
+    color, msg = app._describe_token_budget(n_tokens=4000, budget=4000)
+    assert color == "green"
+
+
+def test_describe_token_budget_over_limit(app):
+    color, msg = app._describe_token_budget(n_tokens=10_000, budget=4000)
+    assert color == "orange"
+    assert "10,000" in msg
+    assert "chunk" in msg.lower()
+
+
+def test_describe_token_budget_over_limit_reports_chunk_count(app):
+    # chunk step = DEFAULT_CHUNK_TOKENS - DEFAULT_OVERLAP_TOKENS = 3500 - 200 = 3300
+    # 10000 / 3300 = 3.03 → ceil = 4
+    _, msg = app._describe_token_budget(n_tokens=10_000, budget=4000)
+    assert "4" in msg  # estimated chunk count
+
+
 # --- _render_config ---
 
 
