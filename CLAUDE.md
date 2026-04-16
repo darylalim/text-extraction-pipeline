@@ -48,7 +48,8 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 ### `chunking.py`
 
 - **Constants** — `DEFAULT_CHUNK_TOKENS`, `DEFAULT_OVERLAP_TOKENS`, `HEADER_ATTACH_ZONE`, `SECTION_HEADERS`
-- **`chunk_text(text, tokenizer, max_tokens, overlap) -> list[str]`** — Splits text into overlapping token-window chunks; header-attach rule pushes clinical section headers (e.g. "Assessment:", "Plan:") found in the last `HEADER_ATTACH_ZONE` tokens of a chunk to the start of the next chunk instead of splitting mid-section
+- **`chunk_text(text, tokenizer, max_tokens, overlap) -> list[str]`** — Splits text into overlapping token-window chunks; header-attach rule pushes standalone clinical section headers (e.g. `"ASSESSMENT:\n"`) found in the last `HEADER_ATTACH_ZONE` tokens of a chunk to the start of the next chunk
+- **`_split_long_line(line, tokenizer, max_tokens) -> list[str]`** — Word-boundary fallback for single lines exceeding `max_tokens` (e.g. run-on dictation without line breaks); preserves trailing newline on last sub-line, uses space separator when input has no newline
 
 ### `merging.py`
 
@@ -72,7 +73,7 @@ Bundled ICD-10-CM code set (dev subset in repo). CMS dotless uppercase format (e
 
 Converts the CMS ICD-10-CM source file to the bundled JSON format consumed by `validation.py`.
 
-Shared test helpers in `tests/conftest.py`. Tests in `tests/test_chunking.py` (15 tests), `tests/test_merging.py` (13 tests), `tests/test_validation.py` (16 tests), `tests/test_streamlit_app.py` (51 tests), and `tests/test_utils.py` (16 tests). Total: 111 tests.
+Shared fixtures in `tests/conftest.py` (`sample_icd10_codes`, `sample_3_chunk_text`, `sample_per_chunk_results`). Tests in `tests/test_chunking.py` (22 tests), `tests/test_merging.py` (13 tests), `tests/test_validation.py` (16 tests), `tests/test_streamlit_app.py` (51 tests), and `tests/test_utils.py` (16 tests). Total: 118 tests.
 
 ## Key Details
 

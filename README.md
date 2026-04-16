@@ -1,15 +1,15 @@
 # NuExtract Pipeline
 
-Structured extraction pipeline using [NuExtract-1.5-MLX-8bit](https://huggingface.co/mlx-community/numind-NuExtract-1.5-MLX-8bit). Accepts text with a user-defined template to extract structured data. Streamlit web UI with text and CSV batch processing tabs. Optimized for Apple Silicon via MLX.
+Clinical structured extraction pipeline using [NuExtract-1.5-MLX-8bit](https://huggingface.co/mlx-community/numind-NuExtract-1.5-MLX-8bit). Extracts structured fields (diagnoses, medications, ICD-10 codes, dosages) from clinical notes and dictation transcripts. Streamlit web UI optimized for Apple Silicon via MLX.
 
 ## Features
 
-- **Text extraction** — paste text, define a template, get structured JSON output
-- **CSV batch processing** — extract from every row in a CSV file with progress tracking
+- **Clinical extraction** — paste a note, pick a preset, get structured JSON output
+- **Long-document chunking** — automatic splitting of notes exceeding the input limit, with overlap and clinical section header-attach; per-chunk results merged field-aware (scalars: first non-empty; lists: union + de-dupe)
+- **ICD-10-CM validation** — extracted codes are annotated `valid`/`invalid` against a bundled CMS code set
+- **Clinical presets** — 5 built-in: SOAP Note, Discharge Summary, H&P, Medication Reconciliation, Problem List
 - **Multi-format templates** — accepts JSON, YAML, or Pydantic model definitions
-- **Extraction presets** — 5 built-in presets (Person, Job Posting, Invoice, Product, Scientific Paper)
 - **Configurable output length** — inline slider for max new tokens (64–4096, default 2048)
-- **Token limit** — enforces a 4,096 input token limit to prevent memory issues
 - **Multi-language** — supports English, French, Spanish, German, Portuguese, Italian
 
 ## Requirements
@@ -31,6 +31,16 @@ uv run streamlit run streamlit_app.py
 
 The model (~4 GB) is downloaded automatically on first run.
 
+## ICD-10 Data
+
+The repo ships with a small dev subset of ICD-10-CM codes (`data/icd10_cm_2026.json`) sufficient for the sample presets. For production use, generate the full ~74k-code set from the CMS source:
+
+```bash
+python scripts/generate_icd10_data.py path/to/icd10cm_order_2025.txt data/icd10_cm_2026.json
+```
+
+Source: [CMS 2025 ICD-10-CM](https://www.cms.gov/medicare/coding-billing/icd-10-codes/2025-icd-10-cm).
+
 ## Testing
 
 ```bash
@@ -40,12 +50,21 @@ uv run pytest
 ## Project Structure
 
 ```
-streamlit_app.py          # Main app — UI, model loading, extraction
-utils.py                  # Template format detection and conversion
-presets.json              # 5 built-in extraction presets
+streamlit_app.py          # UI, model loading, extraction orchestration
+utils.py                  # Template format detection (JSON/YAML/Pydantic)
+chunking.py               # Text splitting with overlap and header-attach
+merging.py                # Field-aware per-chunk result merging
+validation.py             # ICD-10-CM code annotation
+presets.json              # 5 clinical extraction presets
+data/
+  icd10_cm_2026.json      # Bundled ICD-10-CM code set (dev subset)
+scripts/
+  generate_icd10_data.py  # CMS source → JSON converter
 tests/
-  conftest.py             # Shared test fixtures
-  test_streamlit_app.py   # App tests (48 tests)
-  test_utils.py           # Utility tests (16 tests)
-  data/csv/               # Sample test data
+  conftest.py             # Shared fixtures
+  test_streamlit_app.py   # App integration tests (51)
+  test_chunking.py        # Chunking tests (22)
+  test_merging.py         # Merging tests (13)
+  test_validation.py      # ICD-10 validation tests (16)
+  test_utils.py           # Template detection tests (16)
 ```
