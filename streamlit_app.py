@@ -4,14 +4,14 @@ from typing import NamedTuple
 
 logging.getLogger("transformers.modeling_rope_utils").setLevel(logging.ERROR)
 
-import streamlit as st
-from mlx_lm import generate as mlx_generate
-from mlx_lm import load as mlx_load
+import streamlit as st  # noqa: E402
+from mlx_lm import generate as mlx_generate  # noqa: E402
+from mlx_lm import load as mlx_load  # noqa: E402
 
-from utils import DEFAULT_MAX_NEW_TOKENS, detect_and_convert_template
-from chunking import chunk_text
-from merging import merge_results
-from validation import annotate_icd10, count_invalid_codes, load_icd10_codes
+from utils import DEFAULT_MAX_NEW_TOKENS, detect_and_convert_template  # noqa: E402
+from chunking import chunk_text  # noqa: E402
+from merging import merge_results  # noqa: E402
+from validation import annotate_icd10, count_invalid_codes, load_icd10_codes  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

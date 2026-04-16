@@ -462,6 +462,61 @@ def test_run_extraction_truncated_chunks_warning(app):
     assert any("truncated" in w.lower() for w in warnings)
 
 
+def test_run_extraction_runtimeerror_single_chunk(app):
+    """RuntimeError in single-chunk path displays error with 'Runtime error:' prefix."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = list(range(50))
+
+    with (
+        patch.object(app, "extract", side_effect=RuntimeError("memory issue")),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_extraction(
+            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"company": ""}
+        )
+    mock_st.error.assert_called_once()
+    assert "runtime error" in mock_st.error.call_args[0][0].lower()
+
+
+def test_run_extraction_json_parse_failure_single_chunk(app):
+    """Single-chunk extraction returning None (JSON parse failure) shows error."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = list(range(50))
+
+    with (
+        patch.object(app, "extract", return_value=(None, False)),
+        patch.object(app, "_load_icd10_codes", return_value=set()),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_extraction(
+            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"company": ""}
+        )
+    mock_st.error.assert_called()
+    error_msgs = [call[0][0].lower() for call in mock_st.error.call_args_list]
+    assert any("json" in msg for msg in error_msgs)
+    mock_st.json.assert_not_called()
+
+
+def test_run_extraction_truncated_single_chunk(app):
+    """Truncated single-chunk result shows warning."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = list(range(50))
+
+    with (
+        patch.object(app, "extract", return_value=({"company": "Acme"}, True)),
+        patch.object(app, "_load_icd10_codes", return_value=set()),
+        patch("streamlit_app.st") as mock_st,
+    ):
+        app._run_extraction(
+            "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"company": ""}
+        )
+    warnings = [call[0][0].lower() for call in mock_st.warning.call_args_list]
+    assert any("truncated" in w for w in warnings)
+
+
 # --- extract ---
 
 
