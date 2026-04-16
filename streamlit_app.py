@@ -17,14 +17,13 @@ MODEL_ID = "mlx-community/numind-NuExtract-1.5-MLX-8bit"
 MAX_INPUT_TOKENS = 4_096
 DEFAULT_TEMPLATE = json.dumps(
     {
-        "first_name": "",
-        "last_name": "",
-        "description": "",
-        "age": "",
-        "gpa": "",
-        "birth_date": "",
-        "nationality": "",
-        "languages_spoken": [],
+        "chief_complaint": "",
+        "hpi": "",
+        "review_of_systems": "",
+        "vitals": {"bp": "", "hr": "", "temp": "", "rr": "", "spo2": ""},
+        "exam_findings": "",
+        "assessment": [{"diagnosis": "", "icd10_code": ""}],
+        "plan": [],
     },
     indent=2,
 )
@@ -39,7 +38,7 @@ def load_presets(path="presets.json"):
     """
     fallback = [
         {
-            "name": "Person",
+            "name": "SOAP Note",
             "template": json.loads(DEFAULT_TEMPLATE),
             "sample_text": "",
         }

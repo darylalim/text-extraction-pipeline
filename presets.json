@@ -1,80 +1,64 @@
 [
   {
-    "name": "Person",
+    "name": "SOAP Note",
     "template": {
-      "first_name": "",
-      "last_name": "",
-      "description": "",
-      "age": "",
-      "gpa": "",
-      "birth_date": "",
-      "nationality": "",
-      "languages_spoken": []
+      "chief_complaint": "",
+      "hpi": "",
+      "review_of_systems": "",
+      "vitals": {"bp": "", "hr": "", "temp": "", "rr": "", "spo2": ""},
+      "exam_findings": "",
+      "assessment": [{"diagnosis": "", "icd10_code": ""}],
+      "plan": []
     },
-    "sample_text": "Maria Garcia, born December 1, 1995, is a 30-year-old student from France. She maintains a 3.5 GPA and speaks French, English, and Spanish fluently."
+    "sample_text": "S: Mr. Doe is a 58-year-old male presenting with productive cough and shortness of breath x 5 days. Reports low-grade fever and pleuritic chest pain. Denies hemoptysis. ROS otherwise negative.\nO: BP 138/86, HR 102, T 38.4C, RR 22, SpO2 92% on RA. Lungs: crackles in right lower lobe. Heart: tachycardic, regular. No peripheral edema.\nA: Community-acquired pneumonia (J18.9), likely bacterial.\nP: Chest X-ray, CBC, blood cultures. Start azithromycin 500mg PO daily x 5 days. Encourage fluids. Return if symptoms worsen."
   },
   {
-    "name": "Job Posting",
+    "name": "Discharge Summary",
     "template": {
-      "company": "",
-      "position": "",
-      "location": "",
-      "remote": "",
-      "years_of_experience": "",
-      "required_skills": [],
-      "salary": ""
+      "admission_date": "",
+      "discharge_date": "",
+      "principal_diagnosis": {"diagnosis": "", "icd10_code": ""},
+      "secondary_diagnoses": [{"diagnosis": "", "icd10_code": ""}],
+      "procedures": [],
+      "hospital_course": "",
+      "discharge_medications": [{"name": "", "dose": "", "frequency": "", "route": ""}],
+      "follow_up": [],
+      "disposition": "",
+      "pending_results": []
     },
-    "sample_text": "TechCorp is hiring a Senior Backend Engineer in San Francisco (hybrid). Requires 5+ years of experience with Python, PostgreSQL, and AWS. Salary range: $150K-$200K."
+    "sample_text": "Admission: 03/14/2026. Discharge: 03/18/2026.\nPrincipal Diagnosis: Acute exacerbation of COPD (J44.1).\nSecondary Diagnoses: Type 2 diabetes mellitus (E11.9), Essential hypertension (I10).\nProcedures: None.\nHospital Course: Mrs. Smith was admitted with worsening dyspnea and productive cough. Treated with IV methylprednisolone, nebulized albuterol/ipratropium, and a 5-day course of azithromycin. Symptoms improved by day 3. Weaned to room air by day 4.\nDischarge Medications: Prednisone 40mg PO daily x 5 days, albuterol inhaler 2 puffs PRN, tiotropium 18mcg inhaled daily, metformin 1000mg PO BID, lisinopril 10mg PO daily.\nFollow-up: Pulmonology in 2 weeks. PCP in 1 week.\nDisposition: Home with family.\nPending Results: Sputum culture pending at time of discharge."
   },
   {
-    "name": "Invoice",
+    "name": "H&P",
     "template": {
-      "vendor": "",
-      "invoice_number": "",
-      "date": "",
-      "line_items": [
-        {
-          "description": "",
-          "quantity": "",
-          "unit_price": "",
-          "total": ""
-        }
-      ],
-      "subtotal": "",
-      "tax": "",
-      "total_due": "",
-      "payment_terms": ""
+      "chief_complaint": "",
+      "hpi": "",
+      "past_medical_history": [],
+      "past_surgical_history": [],
+      "family_history": [],
+      "social_history": "",
+      "allergies": [{"substance": "", "reaction": ""}],
+      "current_medications": [{"name": "", "dose": "", "frequency": "", "route": ""}],
+      "review_of_systems": "",
+      "physical_exam": "",
+      "assessment_and_plan": ""
     },
-    "sample_text": "Invoice #INV-2026-0042 from Acme Supplies, dated March 10, 2026. Items: 50x Widget A at $12.00 each ($600.00), 20x Widget B at $25.50 each ($510.00). Subtotal: $1,110.00. Tax (8%): $88.80. Total due: $1,198.80. Payment terms: Net 30."
+    "sample_text": "Chief Complaint: Right-sided abdominal pain x 2 days.\nHPI: 34-year-old female presenting with sharp RLQ pain that began yesterday morning. Pain is constant, 7/10, worse with movement. Associated nausea, one episode of vomiting. No diarrhea. Last meal 8 hours ago.\nPMH: Asthma, GERD.\nPSH: Tonsillectomy as a child.\nFH: Mother with breast cancer at 62. Father with hypertension.\nSH: Non-smoker, occasional alcohol, works as a teacher.\nAllergies: Penicillin (hives).\nCurrent Medications: Albuterol inhaler PRN, omeprazole 20mg PO daily.\nROS: Negative except as noted in HPI.\nPhysical Exam: Afebrile, vitals stable. Abdomen: tender to palpation in RLQ with rebound tenderness. Positive McBurney's sign.\nA/P: Suspected acute appendicitis. Order CBC, CMP, urinalysis, abdominal CT. Surgical consult."
   },
   {
-    "name": "Product",
+    "name": "Medication Reconciliation",
     "template": {
-      "name": "",
-      "brand": "",
-      "price": "",
-      "currency": "",
-      "category": "",
-      "specifications": [
-        {
-          "attribute": "",
-          "value": ""
-        }
-      ]
+      "patient_name": "",
+      "mrn": "",
+      "medications": [{"name": "", "dose": "", "frequency": "", "route": "", "indication": "", "status": ""}]
     },
-    "sample_text": "The Samsung Galaxy S26 Ultra is priced at $1,299.99 USD. This flagship smartphone features a 6.9-inch AMOLED display, 256GB storage, 12GB RAM, and a 5,500mAh battery with 65W fast charging."
+    "sample_text": "Patient: Jane Roe. MRN: 00123456.\nCurrent medications reviewed with patient:\n- Metformin 1000mg PO BID for type 2 diabetes. Continue.\n- Lisinopril 20mg PO daily for hypertension. Continue.\n- Atorvastatin 40mg PO QHS for hyperlipidemia. Continue.\n- Aspirin 81mg PO daily for cardioprotection. Hold prior to procedure.\n- Sertraline 50mg PO daily for depression. Discontinue, switching to escitalopram.\n- Escitalopram 10mg PO daily. New. Start tomorrow."
   },
   {
-    "name": "Scientific Paper",
+    "name": "Problem List",
     "template": {
-      "title": "",
-      "authors": [],
-      "journal": "",
-      "year": "",
-      "abstract_summary": "",
-      "methods": [],
-      "key_findings": []
+      "problems": [{"diagnosis": "", "icd10_code": "", "status": "", "onset_date": ""}]
     },
-    "sample_text": "\"Attention Is All You Need\" by Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin, published in NeurIPS 2017. The paper introduces the Transformer architecture, which relies entirely on self-attention mechanisms. Key methods include multi-head attention, positional encoding, and layer normalization. The model achieved state-of-the-art results on English-to-German and English-to-French translation benchmarks."
+    "sample_text": "Active problems: Type 2 diabetes mellitus without complications (E11.9), onset 2018. Essential hypertension (I10), onset 2015. Hyperlipidemia (E78.5), onset 2017. Generalized anxiety disorder (F41.1), onset 2020.\nResolved: Acute bronchitis (J20.9), resolved 02/2026."
   }
 ]

@@ -479,7 +479,7 @@ def test_load_presets_fallback(app, tmp_path, content):
         path = str(f)
     result = app.load_presets(path)
     assert len(result) == 1
-    assert result[0]["name"] == "Person"
+    assert result[0]["name"] == "SOAP Note"
 
 
 def test_load_presets_skips_invalid_entries(app, tmp_path):
@@ -501,10 +501,16 @@ def test_load_presets_actual_file(app):
     result = app.load_presets(presets_path)
     assert len(result) == 5
     names = {p["name"] for p in result}
-    assert names == {"Person", "Job Posting", "Invoice", "Product", "Scientific Paper"}
+    assert names == {
+        "SOAP Note",
+        "Discharge Summary",
+        "H&P",
+        "Medication Reconciliation",
+        "Problem List",
+    }
     for p in result:
         assert isinstance(p["template"], dict) and p["template"]
-        assert isinstance(p["sample_text"], str)
+        assert isinstance(p["sample_text"], str) and p["sample_text"]
 
 
 # --- _display_csv_results ---
