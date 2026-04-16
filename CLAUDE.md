@@ -57,7 +57,7 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 ### `validation.py`
 
 - **`load_icd10_codes(path) -> set[str]`** — Loads bundled ICD-10-CM code set from JSON file; returns empty set if file missing
-- **`annotate_icd10(result, codes)`** — Mutates the extraction result dict in-place, adding an `icd10_code_valid` sibling field (`true`/`false`) for each detected ICD-10 code field
+- **`annotate_icd10(result, codes)`** — Walks the extraction result tree and returns an annotated copy with an `icd10_code_valid` sibling (`true`/`false`) next to each `icd10_code` field; normalizes extracted codes (strip, uppercase, remove dots) before lookup; original dict untouched
 - **`count_invalid_codes(result) -> int`** — Returns the count of ICD-10 codes in the result that failed validation
 
 ### `presets.json`
