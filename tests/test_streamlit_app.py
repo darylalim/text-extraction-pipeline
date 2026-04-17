@@ -833,3 +833,22 @@ def test_result_to_csv_strips_validation_flag(app):
     csv_text = app._result_to_csv(result)
     assert "icd10_code_valid" not in csv_text
     assert "True" not in csv_text
+
+
+def test_result_to_csv_skips_non_dict_items(app):
+    """Mixed list with dict + non-dict items should yield rows only for dicts, not crash."""
+    result = {
+        "items": [
+            {"name": "aspirin", "dose": "325mg"},
+            "stray string",
+            {"name": "ibuprofen", "dose": "400mg"},
+        ]
+    }
+    csv_text = app._result_to_csv(result)
+    assert csv_text is not None
+    lines = csv_text.strip().splitlines()
+    # Header + two dict rows (the "stray string" is skipped)
+    assert len(lines) == 3
+    assert "aspirin" in lines[1]
+    assert "ibuprofen" in lines[2]
+    assert "stray string" not in csv_text

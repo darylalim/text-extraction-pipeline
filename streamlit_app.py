@@ -344,6 +344,8 @@ def _result_to_csv(result):
     for field, value in result.items():
         if isinstance(value, list) and value and isinstance(value[0], dict):
             for item in value:
+                if not isinstance(item, dict):
+                    continue
                 rows.append(
                     {
                         "section": field,
