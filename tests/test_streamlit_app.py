@@ -825,6 +825,45 @@ def test_load_presets_actual_file(app):
         assert isinstance(p["sample_text"], str) and p["sample_text"]
 
 
+# --- _collect_invalid_codes ---
+
+
+def test_collect_invalid_codes_no_invalid(app):
+    result = {"problems": [{"icd10_code": "I10", "icd10_code_valid": True}]}
+    assert app._collect_invalid_codes(result) == []
+
+
+def test_collect_invalid_codes_single_invalid(app):
+    result = {"problems": [{"icd10_code": "FAKE.9", "icd10_code_valid": False}]}
+    hits = app._collect_invalid_codes(result)
+    assert len(hits) == 1
+    path, code = hits[0]
+    assert code == "FAKE.9"
+    assert "problems" in path
+
+
+def test_collect_invalid_codes_nested_list(app):
+    result = {
+        "assessment": [
+            {"icd10_code": "I10", "icd10_code_valid": True},
+            {"icd10_code": "BAD1", "icd10_code_valid": False},
+            {"icd10_code": "BAD2", "icd10_code_valid": False},
+        ]
+    }
+    hits = app._collect_invalid_codes(result)
+    assert len(hits) == 2
+    codes = {c for _, c in hits}
+    assert codes == {"BAD1", "BAD2"}
+
+
+def test_collect_invalid_codes_empty_code(app):
+    result = {"icd10_code": "", "icd10_code_valid": False}
+    hits = app._collect_invalid_codes(result)
+    assert len(hits) == 1
+    _, code = hits[0]
+    assert code == ""
+
+
 # --- _result_to_csv ---
 
 

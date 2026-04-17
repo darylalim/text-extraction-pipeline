@@ -378,6 +378,24 @@ def _result_to_csv(result):
     return buf.getvalue()
 
 
+def _collect_invalid_codes(result, path=""):
+    """Walk tree, return list of (path, code) for every invalid ICD-10 code.
+
+    Path uses dot + bracket notation (e.g., 'problems[0].icd10_code').
+    """
+    hits = []
+    if isinstance(result, dict):
+        if result.get("icd10_code_valid") is False:
+            hits.append((path or "root", result.get("icd10_code", "")))
+        for k, v in result.items():
+            sub = f"{path}.{k}" if path else k
+            hits.extend(_collect_invalid_codes(v, sub))
+    elif isinstance(result, list):
+        for i, item in enumerate(result):
+            hits.extend(_collect_invalid_codes(item, f"{path}[{i}]"))
+    return hits
+
+
 def _validate_and_display(result):
     """Annotate ICD-10 codes, display warnings, render JSON, offer downloads."""
     codes = _load_icd10_codes()
