@@ -381,7 +381,10 @@ def _result_to_csv(result):
 def _collect_invalid_codes(result, path=""):
     """Walk tree, return list of (path, code) for every invalid ICD-10 code.
 
-    Path uses dot + bracket notation (e.g., 'problems[0].icd10_code').
+    Path points to the containing dict (e.g., 'problems[0]' for a bad code
+    inside the first entry of 'problems'), using dot-notation for dict keys
+    and bracket-notation for list indices. Returns 'root' for a top-level
+    invalid dict.
     """
     hits = []
     if isinstance(result, dict):

@@ -836,10 +836,7 @@ def test_collect_invalid_codes_no_invalid(app):
 def test_collect_invalid_codes_single_invalid(app):
     result = {"problems": [{"icd10_code": "FAKE.9", "icd10_code_valid": False}]}
     hits = app._collect_invalid_codes(result)
-    assert len(hits) == 1
-    path, code = hits[0]
-    assert code == "FAKE.9"
-    assert "problems" in path
+    assert hits == [("problems[0]", "FAKE.9")]
 
 
 def test_collect_invalid_codes_nested_list(app):
@@ -862,6 +859,13 @@ def test_collect_invalid_codes_empty_code(app):
     assert len(hits) == 1
     _, code = hits[0]
     assert code == ""
+
+
+def test_collect_invalid_codes_root_path(app):
+    """Top-level invalid dict is reported with path='root'."""
+    result = {"icd10_code": "BAD", "icd10_code_valid": False}
+    hits = app._collect_invalid_codes(result)
+    assert hits == [("root", "BAD")]
 
 
 # --- _result_to_csv ---
