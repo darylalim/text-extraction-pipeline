@@ -33,10 +33,17 @@ Main app in `streamlit_app.py`, utilities in `utils.py`, presets in `presets.jso
 - **`_has_config_errors(template_error, template_parsed)`** — Shows first config error via `st.error` and returns `True`, or returns `False` if none
 - **`_get_effective_template(json_str, source_format, template_str)`** — Returns JSON template, converting from YAML/Pydantic if needed and updating session state
 - **`ConfigState`** — `NamedTuple` returned by `_render_config()`: `template_str`, `json_str`, `source_format`, `template_error`, `template_parsed`, `max_new_tokens`
-- **`_render_config()`** — Renders inline config controls (preset selector, max tokens slider, template editor, format expander); returns `ConfigState`; called once above the text input
+- **`_render_config()`** — Renders inline config controls (preset selector, max tokens slider, template editor, format expander); returns `ConfigState`; called once above the text input; YAML/Pydantic templates show a preview expander with a "Replace template with this JSON" button rather than silently converting
+- **`_describe_token_budget(n_tokens, budget)`** — Returns `(color, message)` tuple: green message when input fits in budget, orange warning with estimated chunk count when over
 - **`_load_icd10_codes()`** — `@st.cache_data` wrapper around `load_icd10_codes()` from `validation.py`; keeps validation logic Streamlit-free
-- **`_run_extraction(text, model, tokenizer, template_str, template_parsed, max_new_tokens)`** — Two-path extraction: single-chunk fast path when input fits within token budget, or multi-chunk path with progress bar, `merge_results()`, and ICD-10 validation via `annotate_icd10()`; displays results and any validation warnings
-- **Streamlit UI** — Config rendered above the text input via `_render_config()` (preset selector + max tokens slider side-by-side, then template editor); single Text input with Extract button
+- **`_collect_invalid_codes(result, path="")`** — Walks result tree, returns `list[tuple[path, code]]` for each dict where `icd10_code_valid is False`; path uses dot-notation for dict keys and bracket-notation for list indices (e.g., `"problems[0]"`, or `"root"` for top-level)
+- **`_extract_strings(value)`** — Flattens an extraction subtree into non-empty string leaves for source-pane highlighting; skips `icd10_code_valid` booleans
+- **`_highlight_source(text, needles)`** — HTML-escapes text and wraps each needle (len >= 3 after strip, deduped, longest-first) in `<mark>` tags; span-tracking prevents double-wrapping when super-phrases enclose sub-phrases
+- **`_result_to_csv(result)`** — Flattens list-of-dict result fields into CSV with a `section` column; returns None if no list-of-dict fields; strips `icd10_code_valid` annotations; stdlib csv/io only
+- **`_display_structured(result)`** — Renders result as structured fields: list-of-dict as column tables (red rows for `icd10_code_valid=False`), nested dicts as subheader + st.json, scalars as disabled text inputs; raw JSON stays in a collapsed expander at the bottom
+- **`_validate_and_display(result, input_text)`** — Annotates ICD-10, renders source ↔ extraction side-by-side via `st.columns([1, 1])`; left pane: selectbox picks which field's strings drive highlighting, source text rendered with `<mark>` tags in a scrollable bordered div; right pane: `_display_structured(result)`; download buttons below: JSON (always) and CSV (only if `_result_to_csv` returns non-None)
+- **`_run_extraction(text, model, tokenizer, template_str, template_parsed, max_new_tokens)`** — Two-path extraction: single-chunk fast path when input fits within token budget, or multi-chunk path with progress bar, `merge_results()`, and ICD-10 validation via `annotate_icd10()`; passes `input_text` to `_validate_and_display` for source highlighting
+- **Streamlit UI** — Config rendered above the text input via `_render_config()` (preset selector + max tokens slider side-by-side, then template editor); input uses `st.tabs(["📋 Paste", "📎 Upload"])` with a text_area in the paste tab and a file_uploader (`.txt`, `.md`) in the upload tab; a live token-count caption appears below when input is non-empty
 
 ### `utils.py`
 
@@ -73,14 +80,14 @@ Bundled ICD-10-CM code set (dev subset in repo). Filename matches the CMS source
 
 Converts the CMS ICD-10-CM source file to the bundled JSON format consumed by `validation.py`.
 
-Shared fixtures in `tests/conftest.py` (`sample_icd10_codes`, `sample_3_chunk_text`, `sample_per_chunk_results`). Tests in `tests/test_chunking.py` (22 tests), `tests/test_merging.py` (13 tests), `tests/test_validation.py` (16 tests), `tests/test_streamlit_app.py` (51 tests), and `tests/test_utils.py` (16 tests). Total: 118 tests.
+Shared fixtures in `tests/conftest.py` (`sample_icd10_codes`, `sample_3_chunk_text`, `sample_per_chunk_results`). Tests in `tests/test_chunking.py` (23 tests), `tests/test_merging.py` (16 tests), `tests/test_validation.py` (16 tests), `tests/test_streamlit_app.py` (83 tests), and `tests/test_utils.py` (16 tests). `tests/test_e2e.py` (3 tests, e2e marker, excluded from CI). Total (excluding e2e): 154 tests.
 
 ## Key Details
 
 - Default 2048 new tokens per extraction (`DEFAULT_MAX_NEW_TOKENS`); configurable via inline slider (64–4096)
 - Max 4,096 input tokens (`MAX_INPUT_TOKENS`); raises `ValueError` if exceeded per chunk
 - NuExtract-1.5 prompt format: `<|input|>\n### Template:\n{template}\n### Text:\n{text}\n\n<|output|>\n`
-- Template field accepts JSON, YAML, or Pydantic models; YAML/Pydantic auto-detected and converted on Extract
+- Template field accepts JSON, YAML, or Pydantic models; YAML/Pydantic auto-detected and shown in a preview expander with a "Replace template with this JSON" button to commit the conversion (no silent auto-convert)
 - Detection order: JSON → Pydantic → YAML (Pydantic before YAML because class syntax is valid YAML)
 - NuExtract-1.5 templates use empty strings (`""`) as field placeholders and empty arrays (`[]`) for list fields
 - Text-only extraction (no image/vision support)
