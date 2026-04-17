@@ -1006,3 +1006,44 @@ def test_result_to_csv_skips_non_dict_items(app):
     assert "aspirin" in lines[1]
     assert "ibuprofen" in lines[2]
     assert "stray string" not in csv_text
+
+
+# --- _highlight_source ---
+
+
+def test_highlight_source_wraps_matches(app):
+    html_out = app._highlight_source("The patient has chest pain.", ["chest pain"])
+    assert "<mark>chest pain</mark>" in html_out
+
+
+def test_highlight_source_case_insensitive(app):
+    html_out = app._highlight_source("ASPIRIN 325mg daily", ["aspirin"])
+    assert "<mark>ASPIRIN</mark>" in html_out
+
+
+def test_highlight_source_escapes_html(app):
+    html_out = app._highlight_source("<script>bad</script>", ["bad"])
+    # Raw tags must be escaped so <script> cannot execute
+    assert "&lt;script&gt;" in html_out
+    assert "<script>" not in html_out
+
+
+def test_highlight_source_skips_short_needles(app):
+    # Needles under 3 chars are skipped to avoid noise
+    html_out = app._highlight_source("at it is", ["at", "it"])
+    assert "<mark>" not in html_out
+
+
+def test_highlight_source_no_matches(app):
+    html_out = app._highlight_source("The patient", ["foo"])
+    assert "<mark>" not in html_out
+    assert "The patient" in html_out
+
+
+def test_highlight_source_longest_first(app):
+    # "chest pain acute" should be marked, not just "chest pain"
+    html_out = app._highlight_source(
+        "The patient has chest pain acute onset.",
+        ["chest pain", "chest pain acute"],
+    )
+    assert "<mark>chest pain acute</mark>" in html_out

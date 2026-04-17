@@ -1,8 +1,10 @@
 import csv
+import html as html_lib
 import io
 import json
 import logging
 import math
+import re
 from typing import NamedTuple
 
 logging.getLogger("transformers.modeling_rope_utils").setLevel(logging.ERROR)
@@ -420,6 +422,42 @@ def _extract_strings(value):
             out.extend(_extract_strings(v))
         return out
     return []
+
+
+def _highlight_source(text, needles):
+    """HTML-escape `text` and wrap each needle (len >= 3) in <mark> tags.
+
+    Case-insensitive. Longer needles are matched first so sub-phrases don't
+    consume longer super-phrases.
+    """
+    escaped = html_lib.escape(text)
+    unique = sorted(
+        {n for n in needles if isinstance(n, str) and len(n.strip()) >= 3},
+        key=len,
+        reverse=True,
+    )
+    # Track already-marked character ranges to avoid double-wrapping
+    marked_spans: list[tuple[int, int]] = []
+
+    for needle in unique:
+        pattern = re.compile(re.escape(html_lib.escape(needle)), re.IGNORECASE)
+        new_parts: list[str] = []
+        last = 0
+        for m in pattern.finditer(escaped):
+            s, e = m.start(), m.end()
+            if any(ms <= s and e <= me for ms, me in marked_spans):
+                continue
+            new_parts.append(escaped[last:s])
+            new_parts.append(f"<mark>{m.group(0)}</mark>")
+            last = e
+        new_parts.append(escaped[last:])
+        escaped = "".join(new_parts)
+        # Re-scan to record all marked spans after rebuilding
+        marked_spans = [
+            (match.start(), match.end())
+            for match in re.finditer(r"<mark>.*?</mark>", escaped)
+        ]
+    return escaped
 
 
 def _display_structured(result):
