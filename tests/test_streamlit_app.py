@@ -286,6 +286,7 @@ def test_run_extraction_short_input(app):
         patch.object(app, "_load_icd10_codes", return_value=set()),
         patch("streamlit_app.st") as mock_st,
     ):
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
         app._run_extraction(
             "short text",
             mock_model,
@@ -325,6 +326,7 @@ def test_run_extraction_long_input_chunks_and_merges(app):
         patch("streamlit_app.st") as mock_st,
     ):
         mock_st.progress.return_value = MagicMock()
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
         template_parsed = {"company": "", "revenue": ""}
         app._run_extraction(
             "very long text...",
@@ -363,6 +365,7 @@ def test_run_extraction_partial_chunk_failure(app):
         patch("streamlit_app.st") as mock_st,
     ):
         mock_st.progress.return_value = MagicMock()
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
         app._run_extraction(
             "long text",
             mock_model,
@@ -411,6 +414,7 @@ def test_run_extraction_icd10_validation(app):
         patch.object(app, "_load_icd10_codes", return_value={"I10", "E119"}),
         patch("streamlit_app.st") as mock_st,
     ):
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
         app._run_extraction(
             "text",
             mock_model,
@@ -434,6 +438,7 @@ def test_run_extraction_icd10_missing_data(app):
         patch("streamlit_app.st") as mock_st,
     ):
         mock_st.session_state = {}
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
         app._run_extraction(
             "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"name": ""}
         )
@@ -454,6 +459,7 @@ def test_run_extraction_icd10_missing_warning_suppressed_after_first(app):
         patch("streamlit_app.st") as mock_st,
     ):
         mock_st.session_state = session_state
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
         # First call — warning should fire and set the flag
         app._run_extraction(
             "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"name": ""}
@@ -512,6 +518,7 @@ def test_run_extraction_truncated_chunks_warning(app):
         patch("streamlit_app.st") as mock_st,
     ):
         mock_st.progress.return_value = MagicMock()
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
         app._run_extraction(
             "long text",
             mock_model,
@@ -571,6 +578,7 @@ def test_run_extraction_truncated_single_chunk(app):
         patch.object(app, "_load_icd10_codes", return_value=set()),
         patch("streamlit_app.st") as mock_st,
     ):
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
         app._run_extraction(
             "text", mock_model, mock_tokenizer, TEST_TEMPLATE, {"company": ""}
         )

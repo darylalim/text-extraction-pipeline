@@ -369,7 +369,7 @@ def _result_to_csv(result):
 
 
 def _validate_and_display(result):
-    """Annotate ICD-10 codes, display warnings, render JSON."""
+    """Annotate ICD-10 codes, display warnings, render JSON, offer downloads."""
     codes = _load_icd10_codes()
     if codes:
         result = annotate_icd10(result, codes)
@@ -381,6 +381,24 @@ def _validate_and_display(result):
         st.session_state["_icd10_warning_shown"] = True
 
     st.json(result)
+
+    c1, c2 = st.columns(2)
+    c1.download_button(
+        "⬇ Download JSON",
+        data=json.dumps(result, indent=2),
+        file_name="extraction.json",
+        mime="application/json",
+        key="download_json",
+    )
+    csv_text = _result_to_csv(result)
+    if csv_text:
+        c2.download_button(
+            "⬇ Download CSV (list fields)",
+            data=csv_text,
+            file_name="extraction.csv",
+            mime="text/csv",
+            key="download_csv",
+        )
 
 
 def _run_extraction(
