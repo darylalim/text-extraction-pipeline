@@ -944,6 +944,52 @@ def test_display_structured_no_banner_when_all_valid(app):
     assert not any("invalid" in m.lower() for m in error_msgs)
 
 
+# --- _validate_and_display end-to-end ---
+
+
+def test_validate_and_display_highlights_picked_field(app):
+    """End-to-end: selectbox 'All fields' → source pane renders <mark> tags."""
+    with (
+        patch("streamlit_app.st") as mock_st,
+        patch.object(app, "_load_icd10_codes", return_value=set()),
+    ):
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+        mock_st.selectbox.return_value = "All fields"
+        mock_st.session_state = {}
+
+        app._validate_and_display({"name": "Alice"}, "patient Alice here")
+
+    # st.markdown is called with the highlighted HTML; verify <mark>Alice</mark>
+    # appears in at least one call's first positional argument.
+    md_args = [c[0][0] for c in mock_st.markdown.call_args_list if c[0]]
+    assert any("<mark>Alice</mark>" in arg for arg in md_args), (
+        f"Expected <mark>Alice</mark> in one of the st.markdown calls. "
+        f"Got args: {md_args}"
+    )
+
+
+def test_validate_and_display_clears_stale_highlight_field(app):
+    """Stale highlight_field from a previous result's schema is cleared, not crashed."""
+    with (
+        patch("streamlit_app.st") as mock_st,
+        patch.object(app, "_load_icd10_codes", return_value=set()),
+    ):
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]
+        mock_st.selectbox.return_value = "All fields"
+        # Pretend user previously picked "assessment" on a prior result
+        mock_st.session_state = {"highlight_field": "assessment"}
+
+        # New result has a different schema (no "assessment" field)
+        app._validate_and_display({"name": "Alice"}, "source text")
+
+    # Session state must have been cleared before st.selectbox ran,
+    # so "highlight_field" is either absent or refers to a valid new option.
+    final_value = mock_st.session_state.get("highlight_field")
+    assert final_value in (None, "All fields", "name"), (
+        f"Stale 'assessment' value should have been cleared. Got: {final_value}"
+    )
+
+
 # --- _result_to_csv ---
 
 

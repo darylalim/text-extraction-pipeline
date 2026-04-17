@@ -521,6 +521,10 @@ def _validate_and_display(result, input_text):
     with col_src:
         st.subheader("Source")
         field_opts = ["All fields"] + [f for f in result if f != "icd10_code_valid"]
+        # Clear stale session-state value if it's not in the new field set
+        # (happens when user switches preset schemas after a previous extraction).
+        if st.session_state.get("highlight_field") not in field_opts:
+            st.session_state.pop("highlight_field", None)
         pick = st.selectbox("Highlight", field_opts, key="highlight_field")
         needles = _extract_strings(
             result if pick == "All fields" else result.get(pick, "")
