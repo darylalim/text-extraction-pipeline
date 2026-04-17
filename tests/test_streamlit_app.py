@@ -868,6 +868,40 @@ def test_collect_invalid_codes_root_path(app):
     assert hits == [("root", "BAD")]
 
 
+# --- _extract_strings ---
+
+
+def test_extract_strings_scalar(app):
+    assert app._extract_strings("hello") == ["hello"]
+
+
+def test_extract_strings_skips_empty(app):
+    assert app._extract_strings("") == []
+    assert app._extract_strings("   ") == []
+
+
+def test_extract_strings_dict_flattens(app):
+    val = {"name": "Alice", "age": "30"}
+    assert sorted(app._extract_strings(val)) == ["30", "Alice"]
+
+
+def test_extract_strings_skips_validity_flag(app):
+    val = {"icd10_code": "I10", "icd10_code_valid": True}
+    # The boolean should not become a string
+    assert app._extract_strings(val) == ["I10"]
+
+
+def test_extract_strings_nested(app):
+    val = {
+        "problems": [
+            {"diagnosis": "HTN", "icd10_code": "I10"},
+            {"diagnosis": "DM2", "icd10_code": "E11.9"},
+        ]
+    }
+    out = app._extract_strings(val)
+    assert set(out) == {"HTN", "I10", "DM2", "E11.9"}
+
+
 # --- _display_structured ---
 
 

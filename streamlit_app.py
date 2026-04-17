@@ -399,6 +399,29 @@ def _collect_invalid_codes(result, path=""):
     return hits
 
 
+def _extract_strings(value):
+    """Flatten an extraction subtree into a list of non-empty string leaves.
+
+    Used to compute highlight needles for the source pane. Skips boolean
+    validity siblings like icd10_code_valid.
+    """
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, list):
+        out = []
+        for v in value:
+            out.extend(_extract_strings(v))
+        return out
+    if isinstance(value, dict):
+        out = []
+        for k, v in value.items():
+            if k == "icd10_code_valid":
+                continue
+            out.extend(_extract_strings(v))
+        return out
+    return []
+
+
 def _display_structured(result):
     """Render an extraction result as structured fields instead of raw JSON.
 
