@@ -505,8 +505,8 @@ def _display_structured(result):
         st.json(result)
 
 
-def _validate_and_display(result):
-    """Annotate ICD-10 codes, display warnings, render structured view, offer downloads."""
+def _validate_and_display(result, input_text):
+    """Annotate ICD-10, render source ↔ extraction side-by-side, offer downloads."""
     codes = _load_icd10_codes()
     if codes:
         result = annotate_icd10(result, codes)
@@ -517,7 +517,24 @@ def _validate_and_display(result):
         st.warning("ICD-10 code list not loaded — validation skipped.")
         st.session_state["_icd10_warning_shown"] = True
 
-    _display_structured(result)
+    col_src, col_out = st.columns([1, 1], gap="medium")
+    with col_src:
+        st.subheader("Source")
+        field_opts = ["All fields"] + [f for f in result if f != "icd10_code_valid"]
+        pick = st.selectbox("Highlight", field_opts, key="highlight_field")
+        needles = _extract_strings(
+            result if pick == "All fields" else result.get(pick, "")
+        )
+        highlighted = _highlight_source(input_text, needles)
+        st.markdown(
+            f'<div style="max-height:500px;overflow-y:auto;white-space:pre-wrap;'
+            f"font-family:monospace;padding:0.5em;border:1px solid #ddd;"
+            f'border-radius:4px;">{highlighted}</div>',
+            unsafe_allow_html=True,
+        )
+    with col_out:
+        st.subheader("Extracted")
+        _display_structured(result)
 
     c1, c2 = st.columns(2)
     c1.download_button(
@@ -565,7 +582,7 @@ def _run_extraction(
 
     if result is None:
         return
-    _validate_and_display(result)
+    _validate_and_display(result, text)
 
 
 # --- Streamlit UI ---

@@ -1008,6 +1008,31 @@ def test_result_to_csv_skips_non_dict_items(app):
     assert "stray string" not in csv_text
 
 
+def test_run_extraction_passes_input_text_to_display(app):
+    """The side-by-side view receives both result and input_text."""
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_tokenizer.encode.return_value = list(range(50))
+
+    with (
+        patch.object(app, "extract", return_value=({"name": "Alice"}, False)),
+        patch.object(app, "_load_icd10_codes", return_value=set()),
+        patch.object(app, "_validate_and_display") as mock_display,
+        patch("streamlit_app.st"),
+    ):
+        app._run_extraction(
+            "patient history text",
+            mock_model,
+            mock_tokenizer,
+            TEST_TEMPLATE,
+            {"name": ""},
+        )
+    mock_display.assert_called_once()
+    args = mock_display.call_args[0]
+    assert args[0] == {"name": "Alice"}
+    assert args[1] == "patient history text"
+
+
 # --- _highlight_source ---
 
 
